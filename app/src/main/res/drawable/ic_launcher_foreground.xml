@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Cap de robot cu ochi-cameră, în zona sigură 66dp a iconiței adaptive -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- antenă -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M52.5,28h3v9h-3z" />
+    <path
+        android:fillColor="#FFFFC107"
+        android:pathData="M54,22.5a4,4 0,1 1,0 8a4,4 0,1 1,0 -8z" />
+    <!-- urechi -->
+    <path
+        android:fillColor="#FFB0BEC5"
+        android:pathData="M25,47h5v14h-5zM78,47h5v14h-5z" />
+    <!-- cap -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M37,36h34a7,7 0,0 1,7 7v24a7,7 0,0 1,-7 7h-34a7,7 0,0 1,-7 -7v-24a7,7 0,0 1,7 -7z" />
+    <!-- ochi: lentile de cameră -->
+    <path
+        android:fillColor="#FF0D2847"
+        android:pathData="M44,46a7,7 0,1 1,0 14a7,7 0,1 1,0 -14zM64,46a7,7 0,1 1,0 14a7,7 0,1 1,0 -14z" />
+    <path
+        android:fillColor="#FF29B6F6"
+        android:pathData="M44,49.5a3.5,3.5 0,1 1,0 7a3.5,3.5 0,1 1,0 -7zM64,49.5a3.5,3.5 0,1 1,0 7a3.5,3.5 0,1 1,0 -7z" />
+    <!-- gură -->
+    <path
+        android:fillColor="#FF0D2847"
+        android:pathData="M46,65h16a2,2 0,0 1,0 4h-16a2,2 0,0 1,0 -4z" />
+</vector>

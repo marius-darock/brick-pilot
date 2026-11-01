@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    android:orientation="vertical">
+
+    <!-- Preview-ul și grila stau deasupra barei de prag, ca rândul de referință să rămână vizibil -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.camera.view.PreviewView
+            android:id="@+id/preview"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <ro.awebdesign.brickpilot.GridOverlayView
+            android:id="@+id/overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+        <!-- Textul se micșorează singur ca să încapă pe un rând pe orice telefon -->
+        <Button
+            android:id="@+id/btnConnect"
+            android:layout_width="170dp"
+            android:layout_height="52dp"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="8dp"
+            android:autoSizeMaxTextSize="16sp"
+            android:autoSizeMinTextSize="9sp"
+            android:autoSizeTextType="uniform"
+            android:backgroundTint="@color/btn_connect_tint"
+            android:maxLines="1"
+            android:text="@string/btn_connect"
+            android:textColor="@android:color/white" />
+
+        <Button
+            android:id="@+id/btnMode"
+            android:layout_width="170dp"
+            android:layout_height="52dp"
+            android:layout_gravity="top|start"
+            android:layout_marginStart="8dp"
+            android:layout_marginTop="64dp"
+            android:autoSizeMaxTextSize="16sp"
+            android:autoSizeMinTextSize="9sp"
+            android:autoSizeTextType="uniform"
+            android:backgroundTint="#FF6A1B9A"
+            android:maxLines="1"
+            android:text="@string/mode_obstacles"
+            android:textColor="@android:color/white" />
+
+        <!-- Statusul stă între coloanele laterale, ca să nu acopere butoanele sau bifele -->
+        <TextView
+            android:id="@+id/status"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginStart="186dp"
+            android:layout_marginEnd="186dp"
+            android:layout_marginTop="12dp"
+            android:ellipsize="end"
+            android:background="#99000000"
+            android:fontFamily="monospace"
+            android:padding="8dp"
+            android:textColor="@android:color/white"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:layout_width="170dp"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="8dp"
+            android:layout_marginEnd="8dp"
+            android:background="#99000000"
+            android:orientation="vertical"
+            android:paddingHorizontal="4dp">
+
+            <CheckBox
+                android:id="@+id/chkInvA"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text="@string/invert_a"
+                android:textColor="@android:color/white" />
+
+            <CheckBox
+                android:id="@+id/chkInvB"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text="@string/invert_b"
+                android:textColor="@android:color/white" />
+        </LinearLayout>
+
+        <Button
+            android:id="@+id/btnStart"
+            android:layout_width="170dp"
+            android:layout_height="120dp"
+            android:layout_gravity="bottom|start"
+            android:layout_margin="8dp"
+            android:backgroundTint="@color/btn_start_tint"
+            android:enabled="false"
+            android:text="@string/btn_start"
+            android:textColor="@android:color/white"
+            android:textSize="28sp"
+            android:textStyle="bold" />
+
+        <!-- STOP ocupă aproape toată coloana din dreapta, ca să fie ușor de nimerit -->
+        <Button
+            android:id="@+id/btnStop"
+            android:layout_width="170dp"
+            android:layout_height="match_parent"
+            android:layout_gravity="end"
+            android:layout_marginTop="112dp"
+            android:layout_marginEnd="8dp"
+            android:layout_marginBottom="8dp"
+            android:backgroundTint="@color/btn_stop_tint"
+            android:enabled="false"
+            android:text="@string/btn_stop"
+            android:textColor="@android:color/white"
+            android:textSize="40sp"
+            android:textStyle="bold" />
+    </FrameLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingHorizontal="24dp">
+
+        <TextView
+            android:id="@+id/thresholdLabel"
+            android:layout_width="90dp"
+            android:layout_height="wrap_content"
+            android:textColor="@android:color/white" />
+
+        <SeekBar
+            android:id="@+id/threshold"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:max="40"
+            android:min="5" />
+
+        <TextView
+            android:id="@+id/speedLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:minWidth="120dp"
+            android:layout_marginStart="24dp"
+            android:textColor="@android:color/white" />
+
+        <SeekBar
+            android:id="@+id/speed"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:max="200"
+            android:min="40" />
+    </LinearLayout>
+</LinearLayout>

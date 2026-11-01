@@ -1,0 +1,25 @@
+<resources>
+    <string name="app_name">BrickPilot</string>
+    <string name="btn_connect">CONNECT</string>
+    <string name="btn_disconnect">DECONECTEAZĂ</string>
+    <string name="btn_connecting">CAUT HUB...</string>
+    <string name="btn_start">START</string>
+    <string name="btn_stop">STOP</string>
+    <string name="mode_obstacles">MOD: OBSTACOLE</string>
+    <string name="mode_line">MOD: LINIE</string>
+    <string name="mode_follow">MOD: URMĂRIRE</string>
+    <string name="invert_a">Inv. A stânga</string>
+    <string name="invert_b">Inv. B dreapta</string>
+    <string name="threshold_label">Prag: %1$d</string>
+    <string name="speed_label">Viteză: %1$d%%</string>
+    <string name="pairing_title">Pregătește hubul</string>
+    <string name="pairing_msg">Ține apăsat butonul verde de pe hub până clipește alb.</string>
+    <string name="pairing_go">Caută</string>
+    <string name="cancel">Anulează</string>
+    <string name="perm_title">Permisiuni necesare</string>
+    <string name="perm_camera_msg">Fără acces la cameră robotul nu vede nimic. Acordă permisiunea din setări.</string>
+    <string name="perm_bt_msg">Fără permisiunile Bluetooth nu mă pot conecta la hub.</string>
+    <string name="perm_settings">Setări</string>
+    <string name="perm_retry">Reîncearcă</string>
+    <string name="perm_exit">Ieși</string>
+</resources>
