@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.hardware.camera2.CaptureRequest
 import android.hardware.display.DisplayManager
 import android.net.Uri
@@ -17,9 +18,12 @@ import android.provider.Settings
 import android.util.Log
 import android.util.Range
 import android.util.Size
+import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -112,10 +116,72 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         getSystemService(DisplayManager::class.java).registerDisplayListener(displayListener, null)
 
         setupControls()
+        applyOrientation(resources.configuration)
         updateButtons()
         renderStatus()
         requestPermissionsIfNeeded()
     }
+
+    // Rotirea nu recreează activitatea (configChanges), deci conexiunea cu hubul rămâne;
+    // doar rearanjăm controalele și spunem camerei noua orientare
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyOrientation(newConfig)
+        updateRotation()
+        hideSystemBars()
+    }
+
+    private fun applyOrientation(config: Configuration) {
+        val portrait = config.orientation == Configuration.ORIENTATION_PORTRAIT
+
+        // Pe verticală statusul trece sub butoanele de sus, pe toată lățimea
+        binding.status.layoutParams = (binding.status.layoutParams as FrameLayout.LayoutParams).apply {
+            gravity = if (portrait) Gravity.TOP or Gravity.START else Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            marginStart = dp(if (portrait) 8 else 186)
+            marginEnd = dp(if (portrait) 8 else 186)
+            topMargin = dp(if (portrait) 124 else 12)
+        }
+
+        // STOP: pe orizontală toată coloana din dreapta, pe verticală lângă START, jos
+        binding.btnStop.layoutParams = (binding.btnStop.layoutParams as FrameLayout.LayoutParams).apply {
+            height = if (portrait) dp(BOTTOM_BUTTON_PORTRAIT) else FrameLayout.LayoutParams.MATCH_PARENT
+            gravity = if (portrait) Gravity.BOTTOM or Gravity.END else Gravity.END
+            topMargin = if (portrait) 0 else dp(112)
+        }
+        binding.btnStart.layoutParams = (binding.btnStart.layoutParams as FrameLayout.LayoutParams).apply {
+            height = dp(if (portrait) BOTTOM_BUTTON_PORTRAIT else 120)
+        }
+
+        // Sliderele: un rând pe orizontală, câte unul pe rând pe verticală
+        binding.bottomBar.orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        binding.bottomBar.gravity = if (portrait) Gravity.START else Gravity.CENTER_VERTICAL
+        for (group in listOf(binding.thresholdGroup, binding.speedGroup, binding.steerGroup)) {
+            group.layoutParams = LinearLayout.LayoutParams(
+                if (portrait) LinearLayout.LayoutParams.MATCH_PARENT else 0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                if (portrait) 0f else 1f
+            ).apply { marginStart = if (portrait || group === binding.thresholdGroup) 0 else dp(24) }
+        }
+
+        // Alegerea mașinii: imaginile una lângă alta sau una sub alta
+        binding.vehicleCards.orientation = if (portrait) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
+        listOf(binding.cardType1, binding.cardType2).forEachIndexed { i, card ->
+            card.layoutParams = LinearLayout.LayoutParams(
+                if (portrait) LinearLayout.LayoutParams.MATCH_PARENT else 0,
+                if (portrait) 0 else LinearLayout.LayoutParams.MATCH_PARENT,
+                1f
+            ).apply {
+                val gap = dp(6)
+                if (portrait) {
+                    if (i == 0) bottomMargin = gap else topMargin = gap
+                } else {
+                    if (i == 0) marginEnd = gap else marginStart = gap
+                }
+            }
+        }
+    }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
 
     override fun onResume() {
         super.onResume()
@@ -286,8 +352,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         binding.chkInvA.setText(if (steering) R.string.invert_a_steer else R.string.invert_a)
         binding.chkInvB.setText(if (steering) R.string.invert_b_drive else R.string.invert_b)
         binding.btnVehicle.setText(if (steering) R.string.vehicle_btn_2 else R.string.vehicle_btn_1)
-        binding.steerLabel.visibility = if (steering) View.VISIBLE else View.GONE
-        binding.steer.visibility = if (steering) View.VISIBLE else View.GONE
+        binding.steerGroup.visibility = if (steering) View.VISIBLE else View.GONE
         steeringRange = null
         steerText = ""
     }
@@ -730,5 +795,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         private const val KEY_LEARN_SPEED = "learn_steer_speed"
         private const val STATUS_INTERVAL_MS = 150L
         private const val CALIBRATION_TICK_MS = 50L
+        // Pe verticală START și STOP sunt mai joase, ca să nu acopere chenarul galben al podelei
+        private const val BOTTOM_BUTTON_PORTRAIT = 96
     }
 }

@@ -4,7 +4,7 @@ An Android app that turns a phone into the brain of a LEGO Technic robot car.
 The phone looks at the floor through its rear camera, finds obstacles or a line, and drives the
 motors of a Technic Hub 88012 over Bluetooth LE.
 
-Current version: **1.2.0** (versionCode 3).
+Current version: **1.3.0** (versionCode 4).
 
 Two kinds of car are supported:
 
@@ -57,7 +57,8 @@ status lines in the Kotlin code). Code comments stay in Romanian.
 ## Starting the robot
 
 1. Fresh batteries in the hub. Plug the motors in as described for your car type below.
-2. Phone in its holder, landscape, rear camera facing forward, tilted about 30 degrees down.
+2. Phone in its holder, landscape or portrait, rear camera facing forward, tilted about 30 degrees
+   down. The screen follows the phone's position (see "Screen orientation" below).
 3. Start the app and accept the permissions (camera, Bluetooth).
 4. On the first start, pick the car type (see below).
 5. Tap **CONNECT**, then hold the green button on the hub until it blinks white.
@@ -67,6 +68,22 @@ status lines in the Kotlin code). Code comments stay in Romanian.
 7. Put the robot on free floor and check the grid: cells in front of the wheels should be green,
    obstacles red. The yellow box is the floor reference and must sit on clean floor.
 8. Tap **START** (blue LED). **STOP** brakes at once and leaves autonomous mode.
+
+## Screen orientation
+
+The app rotates with the phone, in all four directions, based on the phone's own sensor. It follows
+the phone's position even when auto-rotate is turned off in the system settings, so the phone can be
+mounted lying down (landscape) or standing up (portrait).
+
+- Rotating does not restart the app: the hub connection, the steering calibration and autonomous
+  driving all continue.
+- The camera image is analysed upright in both orientations. In portrait the grid and the line bands
+  cover a taller, narrower image, so the camera sees further ahead and less to the sides; check the
+  tilt so the yellow floor box still sits right in front of the wheels.
+- Landscape: buttons in the side columns, sliders in one row at the bottom.
+- Portrait: CONNECT and MODE at the top left, the status under them, START and STOP side by side at
+  the bottom, and one slider per row below them. The car type picker shows the two images one above
+  the other.
 
 ## Car type
 
@@ -104,7 +121,7 @@ settings.
 - The car cannot spin in place, so the spins of the autonomous modes become reversing with the
   wheels turned the opposite way, like a three-point turn. The camera does not see behind the car
   during those manoeuvres.
-- If the car turns the wrong way, check **Inv. A steering**; if it drives backwards, check
+- If the car turns the wrong way, check **Inv. A steer**; if it drives backwards, check
   **Inv. B drive**.
 
 ## Reaction time

@@ -10,7 +10,7 @@
     <string name="mode_follow">MODE: FOLLOW</string>
     <string name="invert_a">Inv. A left</string>
     <string name="invert_b">Inv. B right</string>
-    <string name="invert_a_steer">Inv. A steering</string>
+    <string name="invert_a_steer">Inv. A steer</string>
     <string name="invert_b_drive">Inv. B drive</string>
     <string name="vehicle_title">Which car are you driving?</string>
     <string name="vehicle_type1">Type 1: two motors on the rear wheels</string>

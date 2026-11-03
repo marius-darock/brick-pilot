@@ -56,7 +56,8 @@
             android:text="@string/mode_obstacles"
             android:textColor="@android:color/white" />
 
-        <!-- Statusul stă între coloanele laterale, ca să nu acopere butoanele sau bifele -->
+        <!-- Statusul stă între coloanele laterale, ca să nu acopere butoanele sau bifele.
+             Pe verticală MainActivity îl mută sub butoane, iar STOP devine cât START -->
         <TextView
             android:id="@+id/status"
             android:layout_width="wrap_content"
@@ -129,7 +130,9 @@
             android:textStyle="bold" />
     </FrameLayout>
 
+    <!-- Bara de jos: pe orizontală un singur rând, pe verticală câte un slider pe rând -->
     <LinearLayout
+        android:id="@+id/bottomBar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:gravity="center_vertical"
@@ -154,57 +157,83 @@
             android:textColor="@android:color/white"
             android:textSize="11sp" />
 
-        <TextView
-            android:id="@+id/thresholdLabel"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:minWidth="110dp"
-            android:textColor="@android:color/white" />
-
-        <SeekBar
-            android:id="@+id/threshold"
+        <LinearLayout
+            android:id="@+id/thresholdGroup"
             android:layout_width="0dp"
-            android:layout_height="40dp"
-            android:layout_weight="1"
-            android:max="40"
-            android:min="5" />
-
-        <TextView
-            android:id="@+id/speedLabel"
-            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:minWidth="120dp"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/thresholdLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="110dp"
+                android:textColor="@android:color/white" />
+
+            <SeekBar
+                android:id="@+id/threshold"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:max="40"
+                android:min="5" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/speedGroup"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
             android:layout_marginStart="24dp"
-            android:textColor="@android:color/white" />
-
-        <SeekBar
-            android:id="@+id/speed"
-            android:layout_width="0dp"
-            android:layout_height="40dp"
             android:layout_weight="1"
-            android:max="200"
-            android:min="40" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/speedLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:minWidth="120dp"
+                android:textColor="@android:color/white" />
+
+            <SeekBar
+                android:id="@+id/speed"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:max="200"
+                android:min="40" />
+        </LinearLayout>
 
         <!-- Doar la tipul 2: cât de tare virează direcția pentru aceeași comandă -->
-        <TextView
-            android:id="@+id/steerLabel"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:id="@+id/steerGroup"
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_marginStart="24dp"
-            android:maxLines="1"
-            android:minWidth="100dp"
-            android:textColor="@android:color/white"
-            android:visibility="gone" />
-
-        <SeekBar
-            android:id="@+id/steer"
-            android:layout_width="0dp"
-            android:layout_height="40dp"
             android:layout_weight="1"
-            android:max="400"
-            android:min="100"
-            android:visibility="gone" />
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/steerLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:minWidth="100dp"
+                android:textColor="@android:color/white" />
+
+            <SeekBar
+                android:id="@+id/steer"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:max="400"
+                android:min="100" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>
 
@@ -229,7 +258,9 @@
             android:textSize="20sp"
             android:textStyle="bold" />
 
+        <!-- Pe orizontală imaginile stau una lângă alta, pe verticală una sub alta -->
         <LinearLayout
+            android:id="@+id/vehicleCards"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_marginTop="8dp"
