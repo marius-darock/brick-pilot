@@ -2,6 +2,7 @@ package ro.awebdesign.brickpilot
 
 import kotlin.math.abs
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Decizia de mers din free[stânga, centru, dreapta], cu ieșire din colțuri. */
@@ -34,10 +35,17 @@ class Avoider {
         cornerCount = 0
     }
 
-    fun decide(free: FloatArray, nowMs: Long): Drive {
+    /** front: distanța până la primul obstacol din față, văzută de sus (0..1), de la FloorAnalyzer. */
+    fun decide(free: FloatArray, nowMs: Long, front: Float = 1f): Drive {
         val left = free[0]
-        val center = free[1]
         val right = free[2]
+        // Distanța reală până la perete are întâietate: aproape de el oprim și ne rotim,
+        // la distanță medie mergem încet, chiar dacă grila încă vede podea
+        val center = when {
+            front < STOP_FRONT -> 0f
+            front < SLOW_FRONT -> min(free[1], (CRUISE_FREE + SLOW_FREE) / 2f)
+            else -> free[1]
+        }
 
         // Manevrele nu se întrerup până expiră, orice ar vedea camera
         when (mode) {
@@ -110,6 +118,9 @@ class Avoider {
         const val SLOW_FORWARD = 25
         const val SLOW_TURN = 45
         const val SIDE_MARGIN = 0.15f
+        // Distanța până la perete, în adâncimea zonei văzute: sub STOP se rotește, sub SLOW încetinește
+        const val STOP_FRONT = 0.15f
+        const val SLOW_FRONT = 0.35f
 
         // Duratele sunt la viteza 100%; la alte viteze se ajustează automat
         const val SPIN_TURN = 60

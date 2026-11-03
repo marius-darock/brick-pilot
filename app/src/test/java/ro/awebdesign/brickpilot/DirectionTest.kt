@@ -10,6 +10,10 @@ import org.junit.Test
  */
 class DirectionTest {
 
+    init {
+        OpenCvForTests.load()
+    }
+
     // Cum se mișcă fizic roțile pentru o comandă: pozitiv = înainte
     private fun wheels(d: Avoider.Drive): Pair<Int, Int> {
         val p = Drivetrain.toPorts(d, invertA = true, invertB = false)

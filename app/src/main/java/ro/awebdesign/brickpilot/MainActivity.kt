@@ -44,6 +44,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import org.opencv.android.OpenCVLoader
 import ro.awebdesign.brickpilot.databinding.ActivityMainBinding
 import java.util.Locale
 import java.util.concurrent.ExecutorService
@@ -108,6 +109,8 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
 
+        // Bibliotecile native OpenCV, înainte de primul cadru
+        if (!OpenCVLoader.initLocal()) Log.e(TAG, "OpenCV nu s-a încărcat")
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE)
         hub = HubController(this, this)
         analyzer = FloorAnalyzer(::onFrame)
@@ -376,6 +379,8 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
                 DriveMode.FOLLOW -> R.string.mode_follow
             }
         )
+        // Pragul de podea nu e folosit la urmărirea liniei; pe ecran rămân doar reglajele care au efect
+        binding.thresholdGroup.visibility = if (driveMode == DriveMode.LINE) View.GONE else View.VISIBLE
     }
 
     private fun updateButtons() {
@@ -492,7 +497,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
                 // Tipul 2 are regula lui de urmărire: roțile spre țintă, fără „rotire pe loc” inversată
                 sendSteer(objectFollower.steering(followDrive, steerGain / Drivetrain.DEFAULT_STEER_GAIN))
             } else {
-                sendDrive(followDrive ?: avoider.decide(r.free, now))
+                sendDrive(followDrive ?: avoider.decide(r.free, now, r.frontDistance))
             }
         }
 
@@ -502,6 +507,9 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     /** Ca onFrame, dar pentru modul linie. */
     private fun onLineFrame(r: LineResult) {
         binding.overlay.updateLine(r)
+        // Punctul țintit, ca să se vadă unde vrea să ajungă mașina
+        val p = if (vehicleType == Drivetrain.VehicleType.STEERING) lineSteer.pursuit else lineFollower.pursuit
+        binding.overlay.aim = if (autonomous.get() && !p.aimX.isNaN()) floatArrayOf(p.aimX, p.aimY) else null
         lastLinePos = LineFollower.position(r)
 
         if (autonomous.get()) {

@@ -19,8 +19,13 @@ android {
         applicationId = "ro.awebdesign.brickpilot"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4.0"
+        versionCode = 6
+        versionName = "1.5.0"
+
+        // OpenCV are biblioteci native pentru fiecare procesor; telefoanele reale sunt ARM
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     signingConfigs {
@@ -53,6 +58,11 @@ android {
     buildFeatures {
         viewBinding = true
     }
+
+    // Log și celelalte clase Android întorc valori implicite în testele de pe calculator
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -63,6 +73,10 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
     implementation("androidx.camera:camera-view:$cameraxVersion")
+    // Viziunea: prag adaptiv, perspectivă, contururi, CamShift
+    implementation("org.opencv:opencv:4.12.0")
 
     testImplementation("junit:junit:4.13.2")
+    // OpenCV pentru calculator, ca testele să ruleze aceeași viziune pe imagini sintetice
+    testImplementation("org.openpnp:opencv:4.9.0-0")
 }

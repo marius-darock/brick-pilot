@@ -52,6 +52,98 @@ class LineSteerTest {
         return Run(amplitude, lost, c)
     }
 
+    /**
+     * Același model, dar mașina primește și linia văzută de sus, ca de la detectorul OpenCV, pe o linie
+     * dreaptă sau pe un cerc de rază 1 m (curbă la dreapta). Întoarce abaterea maximă la final.
+     */
+    private fun drivePursuit(speedFactor: Float, curve: Boolean, tune: (LineSteerController) -> Unit = {}): Run {
+        val c = LineSteerController().also { it.speedFactor = speedFactor; tune(it) }
+        fun line(s: Float): Pair<Float, Float> =
+            if (curve) Pair(R * sin(s / R), R * (1 - kotlin.math.cos(s / R))) else Pair(s, 0f)
+        var x = 0f
+        var y = 0.08f
+        var psi = 0f
+        var motor = 0f
+        var wheel = 0f
+        val delayed = ArrayDeque<LineResult>()
+        var amplitude = 0f
+        var lost = 0
+        var s0 = 0f
+        for (i in 0 until FRAMES) {
+            // Punctele liniei din fața mașinii, în coordonatele mașinii: f înainte, r la dreapta
+            val ground = ArrayList<Float>()
+            var e = Float.NaN
+            var best = Float.MAX_VALUE
+            var s = s0 - 0.3f
+            while (s < s0 + 2f) {
+                val (lx, ly) = line(s)
+                val dx = lx - x
+                val dy = ly - y
+                val f = dx * kotlin.math.cos(psi) + dy * sin(psi)
+                val r = -dx * sin(psi) + dy * kotlin.math.cos(psi)
+                if (f in 0.05f * DEPTH..DEPTH && abs(r) <= GROUND_HALF) {
+                    ground.add(r / GROUND_HALF)
+                    ground.add(f / DEPTH)
+                }
+                if (abs(f - LOOK) < best) {
+                    best = abs(f - LOOK)
+                    e = r / HALF_VIEW
+                }
+                s += 0.02f
+            }
+            delayed.addLast(
+                if (ground.size < 4 || abs(e) > 1f) {
+                    LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0)
+                } else {
+                    LineResult(FloatArray(5) { e }, 640, 480, 0, ground = ground.toFloatArray())
+                }
+            )
+            if (delayed.size > DELAY_FRAMES) {
+                val r = delayed.removeFirst()
+                if (!r.found) lost++
+                val cmd = c.decide(r, i * 1000L / 30)
+                motor += (cmd.steer * MAX_STEER - motor).coerceIn(-STEER_RATE / 30f, STEER_RATE / 30f)
+                if (motor - wheel > BACKLASH) wheel = motor - BACKLASH
+                else if (wheel - motor > BACKLASH) wheel = motor + BACKLASH
+                val v = cmd.speed / 100f * V_MAX
+                psi += v / WHEELBASE * tan(wheel) / 30f
+                x += v * kotlin.math.cos(psi) / 30f
+                y += v * sin(psi) / 30f
+            }
+            // Cât de departe e mașina de linie
+            var dist = Float.MAX_VALUE
+            var bestS = s0
+            var s2 = s0 - 0.3f
+            while (s2 < s0 + 1f) {
+                val (lx, ly) = line(s2)
+                val d = kotlin.math.hypot(lx - x, ly - y)
+                if (d < dist) { dist = d; bestS = s2 }
+                s2 += 0.01f
+            }
+            s0 = bestS
+            if (i > FRAMES * 2 / 3) amplitude = max(amplitude, dist)
+        }
+        return Run(amplitude, lost, c)
+    }
+
+    @Test
+    fun pursuitStaysOnAStraightLineAtEverySpeed() {
+        for (sf in listOf(0.6f, 1f, 1.5f, 2f)) {
+            val r = drivePursuit(sf, curve = false)
+            assertTrue("viteza $sf: a pierdut linia ${r.lostFrames} cadre", r.lostFrames == 0)
+            assertTrue("viteza $sf: abatere ${r.amplitude}", r.amplitude < 0.03f)
+        }
+    }
+
+    @Test
+    fun pursuitFollowsACurve() {
+        for (sf in listOf(0.6f, 1f, 1.5f, 2f)) {
+            val r = drivePursuit(sf, curve = true)
+            assertTrue("viteza $sf: a pierdut linia în curbă ${r.lostFrames} cadre", r.lostFrames == 0)
+            assertTrue("viteza $sf: abatere în curbă ${r.amplitude}", r.amplitude < 0.04f)
+        }
+    }
+
     @Test
     fun oldControllerLosesTheLineAtSpeed() {
         // Ce se vedea pe mașină: încet merge, repede iese de pe linie oricât de tare virează
@@ -136,5 +228,8 @@ class LineSteerTest {
         const val LOOK = 0.25f          // m, cât de departe în față se uită camera
         const val HALF_VIEW = 0.15f     // m, jumătatea lățimii văzute
         const val DELAY_FRAMES = 7
+        const val DEPTH = 0.5f          // m, cât de departe vede camera podeaua în vederea de sus
+        const val GROUND_HALF = DEPTH * PurePursuit.GROUND_ASPECT
+        const val R = 1.0f              // m, raza curbei
     }
 }

@@ -9,7 +9,7 @@ Fișiere în acest folder:
 
 Date aplicație:
 - Pachet: `ro.awebdesign.brickpilot` (nu se mai poate schimba după primul upload)
-- Versiune: 1.4.0 (versionCode 5)
+- Versiune: 1.5.0 (versionCode 6)
 - Categorie: Instrumente (Tools)
 - Etichete sugerate: Robotică, Educație, Hobby
 

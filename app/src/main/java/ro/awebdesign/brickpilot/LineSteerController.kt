@@ -1,6 +1,7 @@
 package ro.awebdesign.brickpilot
 
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
@@ -49,6 +50,9 @@ class LineSteerController {
 
     // Drumul parcurs, ca să se poată întoarce acolo unde a văzut linia ultima dată
     private val history = CommandHistory(RETRACE_MS)
+
+    /** Pure pursuit pe linia văzută de sus, când detectorul o dă. */
+    val pursuit = PurePursuit()
     private var searchStartMs = 0L
 
     fun reset() {
@@ -63,6 +67,7 @@ class LineSteerController {
         stableSinceMs = 0L
         sameSideSinceMs = 0L
         history.clear()
+        pursuit.reset()
         searchStartMs = 0L
     }
 
@@ -95,9 +100,15 @@ class LineSteerController {
 
         // Unde va fi linia când comanda ajunge la roți
         val predicted = err + dFiltered * LATENCY_S
-        // La viteză mare același unghi întoarce mai repede: unghiul scade cu viteza
-        val schedule = 1f / max(MIN_SCHEDULE_SPEED, speedNorm).pow(SPEED_EXPONENT)
-        val steer = (K_STEER * predicted * schedule * steerScale * learnedGain).coerceIn(-1f, 1f)
+        // Cu linia văzută de sus țintim un punct de pe ea (pure pursuit); altfel, regulatorul pe poziție
+        val k = pursuit.curvature(r.ground, speedNorm, nowMs)
+        val steer = if (!k.isNaN()) {
+            (K_PURSUIT * k * steerScale * learnedGain).coerceIn(-1f, 1f)
+        } else {
+            // La viteză mare același unghi întoarce mai repede: unghiul scade cu viteza
+            val schedule = 1f / max(MIN_SCHEDULE_SPEED, speedNorm).pow(SPEED_EXPONENT)
+            (K_STEER * predicted * schedule * steerScale * learnedGain).coerceIn(-1f, 1f)
+        }
 
         // Încetinim în curbe și cu roțile bracate, ca să aibă timp să corecteze
         val slow = 1f - SLOWDOWN * min(1f, abs(predicted)) - STEER_SLOWDOWN * abs(steer)
@@ -105,6 +116,7 @@ class LineSteerController {
         history.record(nowMs, cmd.steer, cmd.speed.toFloat())
         return cmd
     }
+
 
     /**
      * Linia nu se mai vede. Întâi dăm înapoi pe drumul parcurs, cu aceleași unghiuri, până reapare;
@@ -190,6 +202,9 @@ class LineSteerController {
 
         // Eroarea -1..1 devine unghi -1..1
         const val K_STEER = 1.6f
+
+        // Curbura pure pursuit devine unghiul roților -1..1
+        const val K_PURSUIT = 0.7f
         // Cameră ~90 ms + analiză + Bluetooth + motorul de direcție, rotunjit în sus
         const val LATENCY_S = 0.3f
         const val SPEED_EXPONENT = 0.8f

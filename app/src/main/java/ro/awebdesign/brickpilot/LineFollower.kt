@@ -24,6 +24,9 @@ class LineFollower {
     private var lastSide = 0
     // Drumul parcurs, ca să se poată întoarce acolo unde a văzut linia ultima dată
     private val history = CommandHistory(RETRACE_MS)
+
+    /** Pure pursuit pe linia văzută de sus, când detectorul o dă. */
+    val pursuit = PurePursuit()
     private var searchStartMs = 0L
 
     fun reset() {
@@ -34,6 +37,7 @@ class LineFollower {
         lastSeenMs = 0L
         lastSide = 0
         history.clear()
+        pursuit.reset()
         searchStartMs = 0L
     }
 
@@ -79,10 +83,17 @@ class LineFollower {
         if (abs(err) > SIDE_DEADBAND) lastSide = if (err > 0) 1 else -1
         mode = Mode.FOLLOW
 
-        // turn > 0 = dreapta, deci linia din dreapta (err > 0) trage robotul la dreapta
-        val turn = (KP * err + KD * dErr).roundToInt().coerceIn(-MAX_TURN, MAX_TURN)
         // În curbe strânse încetinim, ca linia să nu iasă din imagine
         val forward = (BASE_FORWARD * (1f - SLOWDOWN * min(1f, abs(err)))).roundToInt()
+        // Cu linia văzută de sus: curbura arcului spre punctul țintit. La două roți motoare,
+        // turn / forward = curbură · jumătate din ecartament
+        val k = pursuit.curvature(r.ground, speedFactor, nowMs)
+        val turn = if (!k.isNaN()) {
+            (forward * k * PURSUIT_TRACK).roundToInt().coerceIn(-MAX_TURN, MAX_TURN)
+        } else {
+            // turn > 0 = dreapta, deci linia din dreapta (err > 0) trage robotul la dreapta
+            (KP * err + KD * dErr).roundToInt().coerceIn(-MAX_TURN, MAX_TURN)
+        }
         val d = drive(forward, turn)
         history.record(nowMs, d.forward.toFloat(), d.turn.toFloat())
         return d
@@ -111,6 +122,8 @@ class LineFollower {
         const val SEARCH_MS = 2000L
         const val RETRACE_MS = 2500L
         const val RETRACE_SPEED = 35f
+        // Jumătate din ecartament, în unitățile vederii de sus: transformă curbura în diferența dintre roți
+        const val PURSUIT_TRACK = 0.25f
 
         /** Poziția ponderată a liniei, NaN dacă nu e pe nicio bandă. */
         fun position(r: LineResult, lookahead: Float = 0f): Float {

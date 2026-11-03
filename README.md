@@ -4,7 +4,7 @@ An Android app that turns a phone into the brain of a LEGO Technic robot car.
 The phone looks at the floor through its rear camera, finds obstacles or a line, and drives the
 motors of a Technic Hub 88012 over Bluetooth LE.
 
-Current version: **1.4.0** (versionCode 5).
+Current version: **1.5.0** (versionCode 6).
 
 Two kinds of car are supported:
 
@@ -16,7 +16,9 @@ Two kinds of car are supported:
 | File | Role |
 |---|---|
 | `HubController.kt` | BLE: scan, GATT, write queue, watchdog, LWP messages |
-| `FloorAnalyzer.kt` | Vision: 9x7 grid in YUV, floor reference, free[3] |
+| `FloorAnalyzer.kt` | Vision (OpenCV): cleaned 9x7 grid in YUV, floor reference, free[3], distance to the wall ahead |
+| `GroundView.kt` | Perspective transform to a top-down view of the floor |
+| `PurePursuit.kt` | Line mode: aims at a point on the line ahead and gives the arc to drive |
 | `Avoider.kt` | Decision: drive, slow down, spin in place, motor mixing |
 | `LineDetector.kt` | Vision for line mode: black line on 5 bands, linked chains, ignores stray dots |
 | `CommandHistory.kt` | Last driving commands, replayed backwards to return to the line |
@@ -37,7 +39,9 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n ro.awebdesign.brickpilot/.MainActivity
 ```
 
-Needs JDK 17 and Android SDK 36 (`local.properties` points to the SDK).
+Needs JDK 17 and Android SDK 36 (`local.properties` points to the SDK). Vision uses OpenCV
+(`org.opencv:opencv`, native libraries for ARM phones only); the host unit tests run the same vision
+code with `org.openpnp:opencv`.
 
 Tests: `./gradlew testDebugUnitTest`.
 
@@ -153,25 +157,33 @@ The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLE
 
 - The line: black electrical tape or black adhesive tape, 1.5..3 cm wide, on a light floor.
   Contrast is what matters: on dark parquet a black line is hard to see.
-- Five horizontal bands are shown on screen. The yellow dot on each band is where the line was found;
-  yellow lines join them. A red frame around the image means the line is not visible.
-- How the line is recognised (`LineDetector.kt`):
-  - on each band every dark segment is a candidate, but only if it is clearly darker than the floor
-    on **both** sides of it. Parquet joints (too narrow), large shadows (too wide) and the edge of a
-    shadow coming into the picture (dark on one side only) are rejected;
-  - the candidates are joined from the bottom band up into chains; a segment only joins one on the
-    band below (or the one below that) that is close enough;
-  - **the line must be seen on at least 2 linked bands.** A single dot on one band, a stain or the end
-    of a line at the side of the track is ignored and no longer shown on screen;
-  - among the chains, the longest one closest to where the line was in the previous frame wins, so a
-    second line appearing at the side does not steal the robot from the line it follows.
-- The robot turns towards the line in proportion to how far it is from the center and slows down in
-  curves.
+- On screen the line found is drawn in yellow from the bottom up; below the thin horizontal line is
+  the area that is analysed. While driving, a cyan circle marks the point on the line the car is
+  aiming at. A red frame around the image means the line is not visible.
+- How the line is recognised (`LineDetector.kt`, with OpenCV):
+  - **adaptive threshold**: a pixel counts as dark when it is darker than the floor right around it,
+    so wide shadows and uneven light do not matter;
+  - **morphological clean-up**: parquet joints and isolated dots are removed;
+  - **connected components**: the line is one long, thin object. Stains and short pieces (less than
+    a fifth of the analysed height), thick blobs (shadows, furniture) and the edge of a shadow coming
+    into the picture (dark on one side only) are rejected;
+  - among the candidates, the one that starts right in front of the robot and is closest to where the
+    line was in the previous frame wins, so a second line at the side does not steal the robot;
+  - the chosen line is turned into a **top-down view** of the floor (perspective transform,
+    `GroundView.kt`), so the controller knows its real shape, not the one squeezed by perspective.
+- **Pure pursuit** (`PurePursuit.kt`): the car aims at the point on the line that lies a certain
+  distance ahead and drives the circular arc through it. The distance grows with speed, so at high
+  speed the car aims further and turns more smoothly; in a curve the point is to the side, so the car
+  turns exactly as much as the curve needs. The aim point is predicted 0.35 s ahead to cover the
+  camera, Bluetooth and motor delay. Both car types use it; type 1 turns the arc into a difference in
+  wheel speeds, type 2 into a wheel angle. Without a top-down line (no line, or only a very short
+  piece) the previous position-based controller takes over. The car also slows down in curves.
 - **If the line leaves the image, the robot goes back the way it came**: it replays its last
   2.5 seconds of commands backwards (same arc, reversed), until the line is in view again. Only if it
   still does not see it does it turn towards the side where it saw the line last, for at most
   2 seconds, then it stops. If it does not see the line at START, it stays put.
-- The threshold slider does not matter in line mode; the speed slider does. Start with 60..80% speed.
+- The threshold slider is hidden in line mode, where it has no effect; the speed slider applies.
+  Start with 60..80% speed.
 
 ### Line mode on a type 2 car
 
@@ -199,24 +211,24 @@ the swings grow until it loses the line. The new controller:
 The **Speed** and **Steer** sliders still apply. Start with Steer at 180% and let it learn; if it
 still swings, lower Steer.
 
-These behaviours are checked by a simulation in `app/src/test/.../LineSteerTest.kt`: a car model with
-the real delay, a rate-limited steering motor and play in the mechanism. In that model the old
-controller loses the line at high speed, as on the real car, and the new one stays on it at every
-speed.
+These behaviours are checked by simulations in `app/src/test/.../LineSteerTest.kt` and
+`DiffPursuitTest.kt`: car models with the real delay, a rate-limited steering motor, play in the
+mechanism (type 2) or motors that need time to reach speed (type 1), on a straight line and on a
+1 m radius curve. In those models pure pursuit stays within about 3 cm of the line at every speed
+from 60% to 200%, and the old proportional controller loses the line at high speed, as on the real
+car.
 
-Tuning in `LineSteerController.kt`: `K_STEER` (how hard it steers), `LATENCY_S` (how far ahead it
-predicts; raise it if it still overshoots), `SPEED_EXPONENT` (how much the angle drops with speed),
-`SLOWDOWN`, `STEER_SLOWDOWN`, and the learning limits `MIN_LEARNED_GAIN`, `MIN_LEARNED_SPEED`.
-
-Tuning in `LineFollower.kt` (type 1):
-- weaves left and right on a straight line: lower `KP`;
-- leaves curves: raise `KP`, lower the speed slider or raise `SLOWDOWN`;
-- reacts too late at high speed: lower `LOOKAHEAD_FROM` so the look-ahead starts at a lower speed;
-- searches too little or too long after losing the line: `SEARCH_MS`, `SEARCH_TURN`.
-
-In `LineDetector.kt`: `MIN_CONTRAST` (how much darker than the floor the line must be), `MIN_WIDTH`
-and `MAX_WIDTH` (accepted widths), `MAX_JUMP` (how far the line may move between two neighbouring
-bands).
+Tuning:
+- `PurePursuit.kt`: `LOOKAHEAD_MIN` and `LOOKAHEAD_PER_SPEED` (how far ahead it aims; further =
+  smoother but cuts corners), `LATENCY_S` (how far ahead it predicts; raise it if it still overshoots);
+- `GroundView.kt`: `TOP_HALF_WIDTH`, the perspective of the top-down view. It depends on the camera
+  tilt; the default fits a phone tilted about 30 degrees down;
+- `LineSteerController.kt` (type 2): `K_PURSUIT` (arc to wheel angle), `SLOWDOWN`, `STEER_SLOWDOWN`,
+  and the learning limits `MIN_LEARNED_GAIN`, `MIN_LEARNED_SPEED`;
+- `LineFollower.kt` (type 1): `PURSUIT_TRACK` (arc to wheel speed difference), `SLOWDOWN`,
+  `SEARCH_MS`, `SEARCH_TURN`;
+- `LineDetector.kt`: `ADAPTIVE_C` (how much darker than its surroundings a pixel must be),
+  `MIN_SPAN` (shortest accepted piece of line), `MAX_THICKNESS`, `SIDE_CONTRAST`, `ROI_TOP`.
 
 ## Stopping
 
@@ -250,7 +262,16 @@ covered by the unit tests in `app/src/test` (`./gradlew testDebugUnitTest`).
 small, the calibration did not reach the end stops: look at the "Steering end at" lines in the log.
 If it is large and the car still turns too little, raise the **Steer** slider.
 
-**How it decides what is floor.** The floor is traced starting from the yellow box: the bottom row
+**Distance to the wall ahead.** Besides the grid, the free floor is filled pixel by pixel with
+OpenCV (flood fill) starting right in front of the robot. On the middle third of the picture, the
+first pixel that is no longer floor, turned into the top-down view, gives the distance to the
+nearest obstacle or wall ahead. In OBSTACLES mode the robot slows down when it gets closer than about
+a third of the visible floor (`SLOW_FRONT` in `Avoider.kt`) and turns away below about a seventh
+(`STOP_FRONT`), even if the coarse grid still shows the cells as free. A wall of exactly the same
+colour as the floor stays hard to see, as before.
+
+**How it decides what is floor.** The picture is first cleaned with an OpenCV median filter (parquet
+joints, texture, noise). The floor is traced starting from the yellow box: the bottom row
 from the center outwards, then each column from the bottom up. A cell is floor if it looks like the
 floor next to it, so reflections on glossy parquet and wide shadows (which change gradually) stay
 floor, while object edges (sudden change) become obstacles. The number in a cell is the difference
@@ -259,7 +280,7 @@ compared with the threshold.
 **Sees obstacles everywhere (too much red).** Raise the threshold slider (bottom). On patterned
 carpets, 20..30.
 
-**Parquet joints.** Each cell uses the median of 25 samples, so a thin line between boards does not
+**Parquet joints.** The picture goes through a median filter before the cells are compared, so a thin line between boards does not
 count. A cell over the threshold with no neighbour over the threshold is ignored (stays green).
 The number in a cell is the real distance, so it can exceed the threshold even when the cell is green.
 If the boards have very different shades, raise the threshold.

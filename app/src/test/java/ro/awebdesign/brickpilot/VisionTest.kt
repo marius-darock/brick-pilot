@@ -15,6 +15,10 @@ import kotlin.math.abs
 /** Recunoașterea liniei și a țintei pe imagini sintetice, plus regulile de mers care depind de ele. */
 class VisionTest {
 
+    init {
+        OpenCvForTests.load()
+    }
+
     // ---------------- Linia ----------------
 
     @Test

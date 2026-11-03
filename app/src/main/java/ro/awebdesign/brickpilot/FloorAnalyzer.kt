@@ -3,7 +3,15 @@ package ro.awebdesign.brickpilot
 import android.util.Log
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import org.opencv.core.Core
+import org.opencv.core.CvType
+import org.opencv.core.Mat
+import org.opencv.core.Point
+import org.opencv.core.Scalar
+import org.opencv.core.Size
+import org.opencv.imgproc.Imgproc
 import kotlin.math.abs
+import kotlin.math.min
 
 /** Rezultatul unui cadru: grila clasificată și spațiul liber pe cele trei treimi. */
 class FloorResult(
@@ -20,25 +28,38 @@ class FloorResult(
     // pentru recunoașterea țintei după culoare în modul urmărire
     val fineY: IntArray = IntArray(0),
     val fineU: IntArray = IntArray(0),
-    val fineV: IntArray = IntArray(0)
+    val fineV: IntArray = IntArray(0),
+    // Distanța până la primul obstacol din față, văzută de sus: 0 lipit de robot .. 1 nimic în zona văzută
+    val frontDistance: Float = 1f
 )
 
 /**
- * Segmentare de podea fără ML: compară fiecare celulă din grilă cu podeaua
- * din fața roților, în spațiul YUV.
+ * Segmentare de podea cu OpenCV. Imaginea mică YUV e curățată cu un filtru median (rosturi, textură,
+ * zgomot), apoi fiecare celulă din grilă e comparată cu podeaua din fața roților. Separat, podeaua liberă
+ * e umplută pixel cu pixel din fața robotului (flood fill), iar marginea ei din față, văzută de sus, dă
+ * distanța până la primul obstacol sau perete.
  */
 class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis.Analyzer {
 
     @Volatile var threshold: Float = DEFAULT_THRESHOLD
     private var lastLogMs = 0L
 
-    private val sy = IntArray(SAMPLES * SAMPLES)
-    private val su = IntArray(SAMPLES * SAMPLES)
-    private val sv = IntArray(SAMPLES * SAMPLES)
-
     private val meanY = FloatArray(COLS * ROWS)
     private val meanU = FloatArray(COLS * ROWS)
     private val meanV = FloatArray(COLS * ROWS)
+
+    private val yRaw = Mat()
+    private val uRaw = Mat()
+    private val vRaw = Mat()
+    private val ySmall = Mat()
+    private val uSmall = Mat()
+    private val vSmall = Mat()
+    private val yuvRaw = Mat()
+    private val yuv = Mat()
+    private val blurred = Mat()
+    private val cells = Mat()
+    private val fine = Mat()
+    private val mask = Mat()
 
     override fun analyze(image: ImageProxy) {
         try {
@@ -49,57 +70,64 @@ class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis
     }
 
     private fun process(image: ImageProxy) {
-        val rawW = image.width
-        val rawH = image.height
+        val w = image.width
+        val h = image.height
         val rot = image.imageInfo.rotationDegrees
-        val upW = if (rot == 90 || rot == 270) rawH else rawW
-        val upH = if (rot == 90 || rot == 270) rawW else rawH
-
         val planes = image.planes
-        val yBuf = planes[0].buffer
-        val uBuf = planes[1].buffer
-        val vBuf = planes[2].buffer
-        val yRow = planes[0].rowStride
-        val yPix = planes[0].pixelStride
-        val uRow = planes[1].rowStride
-        val uPix = planes[1].pixelStride
-        val vRow = planes[2].rowStride
-        val vPix = planes[2].pixelStride
+        copyPlane(planes[0], w, h, yRaw)
+        copyPlane(planes[1], w / 2, h / 2, uRaw)
+        copyPlane(planes[2], w / 2, h / 2, vRaw)
 
-        val top = upH * TOP_IGNORE
-        val cellW = upW / COLS.toFloat()
-        val cellH = (upH - top) / ROWS
+        // Imagine mică, cu culoarea la aceeași rezoluție ca luminanța
+        val size = Size((w / WORK_DIV).toDouble(), (h / WORK_DIV).toDouble())
+        Imgproc.resize(yRaw, ySmall, size, 0.0, 0.0, Imgproc.INTER_AREA)
+        Imgproc.resize(uRaw, uSmall, size, 0.0, 0.0, Imgproc.INTER_LINEAR)
+        Imgproc.resize(vRaw, vSmall, size, 0.0, 0.0, Imgproc.INTER_LINEAR)
+        Core.merge(listOf(ySmall, uSmall, vSmall), yuvRaw)
+        when (rot) {
+            90 -> Core.rotate(yuvRaw, yuv, Core.ROTATE_90_CLOCKWISE)
+            180 -> Core.rotate(yuvRaw, yuv, Core.ROTATE_180)
+            270 -> Core.rotate(yuvRaw, yuv, Core.ROTATE_90_COUNTERCLOCKWISE)
+            else -> yuvRaw.copyTo(yuv)
+        }
+        val upW = if (rot % 180 == 90) h else w
+        val upH = if (rot % 180 == 90) w else h
+        onResult(analyzeYuv(yuv, upW, upH, System.currentTimeMillis()))
+    }
 
-        for (r in 0 until ROWS) {
-            for (c in 0 until COLS) {
-                var k = 0
-                for (j in 0 until SAMPLES) {
-                    val uy = (top + cellH * r + cellH * (j + 0.5f) / SAMPLES).toInt().coerceIn(0, upH - 1)
-                    for (i in 0 until SAMPLES) {
-                        val ux = (cellW * c + cellW * (i + 0.5f) / SAMPLES).toInt().coerceIn(0, upW - 1)
-                        // Din coordonate verticale în coordonatele brute ale senzorului
-                        val x: Int
-                        val y: Int
-                        when (rot) {
-                            90 -> { x = uy; y = rawH - 1 - ux }
-                            180 -> { x = rawW - 1 - ux; y = rawH - 1 - uy }
-                            270 -> { x = rawW - 1 - uy; y = ux }
-                            else -> { x = ux; y = uy }
-                        }
-                        sy[k] = yBuf.get(y * yRow + x * yPix).toInt() and 0xFF
-                        val cx = x shr 1
-                        val cy = y shr 1
-                        su[k] = uBuf.get(cy * uRow + cx * uPix).toInt() and 0xFF
-                        sv[k] = vBuf.get(cy * vRow + cx * vPix).toInt() and 0xFF
-                        k++
-                    }
-                }
-                // Mediana, nu media: liniile subțiri dintre plăcile de parchet nu mai trag valoarea
-                val idx = r * COLS + c
-                meanY[idx] = median(sy)
-                meanU[idx] = median(su)
-                meanV[idx] = median(sv)
+    // Copiază un plan din ImageProxy într-un Mat cu un singur canal, ținând cont de pași
+    private fun copyPlane(plane: ImageProxy.PlaneProxy, w: Int, h: Int, dst: Mat) {
+        if (dst.rows() != h || dst.cols() != w || dst.type() != CvType.CV_8UC1) dst.create(h, w, CvType.CV_8UC1)
+        val buf = plane.buffer
+        val row = ByteArray(w)
+        for (y in 0 until h) {
+            val base = y * plane.rowStride
+            if (plane.pixelStride == 1) {
+                buf.position(base)
+                buf.get(row, 0, w)
+            } else {
+                for (x in 0 until w) row[x] = buf.get(base + x * plane.pixelStride)
             }
+            dst.put(y, 0, row)
+        }
+    }
+
+    /** Imaginea YUV dreaptă, cu 3 canale, la rezoluție mică. frameWidth/Height: cadrul original. */
+    fun analyzeYuv(img: Mat, frameWidth: Int, frameHeight: Int, now: Long): FloorResult {
+        Imgproc.medianBlur(img, blurred, 5)
+        val w = blurred.cols()
+        val h = blurred.rows()
+        val top = (h * TOP_IGNORE).toInt()
+        val roi = blurred.submat(top, h, 0, w)
+
+        // Media fiecărei celule din grilă, după curățare
+        Imgproc.resize(roi, cells, Size(COLS.toDouble(), ROWS.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+        val cb = ByteArray(COLS * ROWS * 3)
+        cells.get(0, 0, cb)
+        for (i in 0 until COLS * ROWS) {
+            meanY[i] = (cb[3 * i].toInt() and 0xFF).toFloat()
+            meanU[i] = (cb[3 * i + 1].toInt() and 0xFF).toFloat()
+            meanV[i] = (cb[3 * i + 2].toInt() and 0xFF).toFloat()
         }
 
         // Referința: cele 3 celule din mijlocul rândului de jos
@@ -118,9 +146,7 @@ class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis
 
         val cls = classify(meanY, meanU, meanV, refY, refU, refV, threshold)
         val obstacle = cls.obstacle
-        val distance = cls.distance
 
-        val now = System.currentTimeMillis()
         if (now - lastLogMs > 1000) {
             lastLogMs = now
             logGrid(refY, refU, refV)
@@ -139,43 +165,55 @@ class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis
             free[t] = rows / ROWS.toFloat()
         }
 
-        // Grila fină pentru urmărirea țintei: media a 2x2 pixeli în fiecare punct
-        val fy = IntArray(FINE_COLS * FINE_ROWS)
-        val fu = IntArray(FINE_COLS * FINE_ROWS)
-        val fv = IntArray(FINE_COLS * FINE_ROWS)
-        for (r in 0 until FINE_ROWS) {
-            for (c in 0 until FINE_COLS) {
-                var ty = 0
-                var tu = 0
-                var tv = 0
-                for (j in 0..1) for (i in 0..1) {
-                    val ux = ((c + 0.25f + i * 0.5f) * upW / FINE_COLS).toInt().coerceIn(0, upW - 1)
-                    val uy = ((r + 0.25f + j * 0.5f) * upH / FINE_ROWS).toInt().coerceIn(0, upH - 1)
-                    val x: Int
-                    val y: Int
-                    when (rot) {
-                        90 -> { x = uy; y = rawH - 1 - ux }
-                        180 -> { x = rawW - 1 - ux; y = rawH - 1 - uy }
-                        270 -> { x = rawW - 1 - uy; y = ux }
-                        else -> { x = ux; y = uy }
-                    }
-                    ty += yBuf.get(y * yRow + x * yPix).toInt() and 0xFF
-                    tu += uBuf.get((y shr 1) * uRow + (x shr 1) * uPix).toInt() and 0xFF
-                    tv += vBuf.get((y shr 1) * vRow + (x shr 1) * vPix).toInt() and 0xFF
-                }
-                val k = r * FINE_COLS + c
-                fy[k] = ty / 4
-                fu[k] = tu / 4
-                fv[k] = tv / 4
-            }
-        }
+        val front = frontDistance(roi, w, h, top)
+        roi.release()
 
-        onResult(FloorResult(obstacle, distance, refY, refU, refV, free, upW, upH, now, fy, fu, fv))
+        // Grila fină pentru recunoașterea țintei după culoare
+        Imgproc.resize(blurred, fine, Size(FINE_COLS.toDouble(), FINE_ROWS.toDouble()), 0.0, 0.0, Imgproc.INTER_AREA)
+        val fb = ByteArray(FINE_COLS * FINE_ROWS * 3)
+        fine.get(0, 0, fb)
+        val fy = IntArray(FINE_COLS * FINE_ROWS) { fb[3 * it].toInt() and 0xFF }
+        val fu = IntArray(FINE_COLS * FINE_ROWS) { fb[3 * it + 1].toInt() and 0xFF }
+        val fv = IntArray(FINE_COLS * FINE_ROWS) { fb[3 * it + 2].toInt() and 0xFF }
+
+        return FloorResult(
+            obstacle, cls.distance, refY, refU, refV, free, frameWidth, frameHeight, now, fy, fu, fv, front
+        )
     }
 
-    private fun median(a: IntArray): Float {
-        a.sort()
-        return a[a.size / 2].toFloat()
+    /**
+     * Podeaua liberă, umplută din fața robotului: un pixel e podea dacă seamănă cu vecinul lui de podea,
+     * deci trecerile treptate de lumină rămân podea. Pe treimea din mijloc căutăm, de jos în sus, primul
+     * pixel care nu mai e podea; cel mai apropiat, văzut de sus, e distanța până la obstacol (0..1).
+     */
+    private fun frontDistance(roi: Mat, w: Int, h: Int, top: Int): Float {
+        val rh = roi.rows()
+        mask.create(rh + 2, w + 2, CvType.CV_8UC1)
+        mask.setTo(Scalar(0.0))
+        val thr = threshold.toDouble()
+        val diff = Scalar(thr * FILL_Y, thr * FILL_UV, thr * FILL_UV)
+        Imgproc.floodFill(
+            roi, mask, Point(w / 2.0, rh - 2.0), Scalar(0.0), null, diff, diff,
+            4 or Imgproc.FLOODFILL_MASK_ONLY or (255 shl 8)
+        )
+        val mb = ByteArray((rh + 2) * (w + 2))
+        mask.get(0, 0, mb)
+        val pts = ArrayList<Point>()
+        var x = w / 3
+        while (x < 2 * w / 3) {
+            for (y in rh - 1 downTo 0) {
+                if (mb[(y + 1) * (w + 2) + x + 1].toInt() == 0) {
+                    pts.add(Point(x.toDouble(), (y + top).toDouble()))
+                    break
+                }
+            }
+            x += 2
+        }
+        if (pts.isEmpty()) return 1f
+        val g = GroundView.toGround(pts, w, h, top)
+        var nearest = 1f
+        for (i in 0 until g.size / 2) nearest = min(nearest, g[2 * i + 1])
+        return nearest.coerceIn(0f, 1f)
     }
 
     // Valorile Y/U/V pe celule, o dată pe secundă, pentru calibrare prin logcat
@@ -196,7 +234,6 @@ class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis
         const val COLS = 9
         const val ROWS = 7
         const val TOP_IGNORE = 0.35f
-        const val SAMPLES = 5
         const val REF_FIRST_COL = 3
         const val REF_COUNT = 3
         const val DEFAULT_THRESHOLD = 14f
@@ -204,6 +241,11 @@ class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis
         const val GLOBAL_FACTOR = 3.5f
         const val FINE_COLS = 40
         const val FINE_ROWS = 30
+        // Imaginea de lucru: cadrul împărțit la atât pe fiecare latură
+        const val WORK_DIV = 4
+        // Toleranța umplerii podelei, în multipli de prag; luminozitatea variază mai mult decât culoarea
+        const val FILL_Y = 1.5
+        const val FILL_UV = 0.6
         private const val TAG = "BrickPilot"
 
         // Chroma cântărește mai mult, e stabilă la umbre

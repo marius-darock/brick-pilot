@@ -8,6 +8,7 @@ import android.graphics.RectF
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
+import kotlin.math.abs
 import ro.awebdesign.brickpilot.FloorAnalyzer.Companion.COLS
 import ro.awebdesign.brickpilot.FloorAnalyzer.Companion.REF_COUNT
 import ro.awebdesign.brickpilot.FloorAnalyzer.Companion.REF_FIRST_COL
@@ -22,6 +23,9 @@ class GridOverlayView @JvmOverloads constructor(
 
     @Volatile private var result: FloorResult? = null
     @Volatile private var line: LineResult? = null
+
+    /** Modul linie: punctul țintit de pure pursuit, (lateral, înainte) în vederea de sus. */
+    @Volatile var aim: FloatArray? = null
 
     /** Ținta recunoscută în modul urmărire, desenată cu un chenar. */
     @Volatile var target: TrackedTarget? = null
@@ -39,6 +43,11 @@ class GridOverlayView @JvmOverloads constructor(
         style = Paint.Style.STROKE
     }
     private val barPaint = Paint().apply { color = Color.argb(200, 0, 200, 255) }
+    private val aimPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.CYAN
+        strokeWidth = 6f
+        style = Paint.Style.STROKE
+    }
     private val targetPaint = Paint().apply {
         color = Color.CYAN
         strokeWidth = 6f
@@ -136,27 +145,42 @@ class GridOverlayView @JvmOverloads constructor(
         }
     }
 
-    // Modul linie: benzile de căutare, punctele găsite și traseul dintre ele
+    // Modul linie: zona analizată, linia găsită (curba OpenCV) și punctul țintit
     private fun drawLine(canvas: Canvas, r: LineResult) {
         fitContent(r.frameWidth, r.frameHeight)
         val midX = content.centerX()
-        canvas.drawLine(midX, content.top + content.height() * 0.5f, midX, content.bottom, linePaint)
+        val roiY = content.top + content.height() * LineDetector.ROI_TOP
+        canvas.drawLine(content.left, roiY, content.right, roiY, linePaint)
+        canvas.drawLine(midX, roiY, midX, content.bottom, linePaint)
 
-        var prevX = Float.NaN
-        var prevY = Float.NaN
-        for (b in r.positions.indices) {
-            val y = content.top + content.height() * LineDetector.BAND_Y[b]
-            canvas.drawLine(content.left, y, content.right, y, linePaint)
-            val p = r.positions[b]
-            if (p.isNaN()) {
-                prevX = Float.NaN
-                continue
+        fun px(x: Float) = content.left + (x + 1f) / 2f * content.width()
+        fun py(y: Float) = content.top + y * content.height()
+
+        val c = r.curve
+        if (c.size >= 4) {
+            for (i in 1 until c.size / 2) {
+                canvas.drawLine(px(c[2 * i - 2]), py(c[2 * i - 1]), px(c[2 * i]), py(c[2 * i + 1]), pathPaint)
             }
-            val x = content.left + (p + 1f) / 2f * content.width()
-            if (!prevX.isNaN()) canvas.drawLine(prevX, prevY, x, y, pathPaint)
-            canvas.drawCircle(x, y, 14f, pointPaint)
-            prevX = x
-            prevY = y
+            // Punctul țintit: punctul curbei cel mai apropiat de țintă în vederea de sus
+            val a = aim
+            val g = r.ground
+            if (a != null && g.size == c.size) {
+                var best = 0
+                var bestD = Float.MAX_VALUE
+                for (i in 0 until g.size / 2) {
+                    val d = abs(g[2 * i] - a[0]) + abs(g[2 * i + 1] - a[1])
+                    if (d < bestD) {
+                        bestD = d
+                        best = i
+                    }
+                }
+                canvas.drawCircle(px(c[2 * best]), py(c[2 * best + 1]), 18f, aimPaint)
+            }
+        } else {
+            for (b in r.positions.indices) {
+                val p = r.positions[b]
+                if (!p.isNaN()) canvas.drawCircle(px(p), py(LineDetector.BAND_Y[b]), 14f, pointPaint)
+            }
         }
         if (!r.found) canvas.drawRect(content, lostPaint)
     }
