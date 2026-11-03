@@ -21,6 +21,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.SeekBar
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.OptIn
 import androidx.camera.camera2.interop.Camera2Interop
@@ -55,6 +56,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     private lateinit var lineDetector: LineDetector
     private val avoider = Avoider()
     private val lineFollower = LineFollower()
+    private val lineSteer = LineSteerController()
     private val objectFollower = ObjectFollower()
 
     enum class DriveMode { AVOID, LINE, FOLLOW }
@@ -157,6 +159,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         val speed = prefs.getInt(KEY_SPEED, 100)
         avoider.speedFactor = speed / 100f
         lineFollower.speedFactor = speed / 100f
+        lineSteer.speedFactor = speed / 100f
         objectFollower.speedFactor = speed / 100f
         binding.speed.progress = speed
         binding.speedLabel.text = getString(R.string.speed_label, speed)
@@ -164,6 +167,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
             override fun onProgressChanged(sb: SeekBar, value: Int, fromUser: Boolean) {
                 avoider.speedFactor = value / 100f
                 lineFollower.speedFactor = value / 100f
+                lineSteer.speedFactor = value / 100f
                 objectFollower.speedFactor = value / 100f
                 binding.speedLabel.text = getString(R.string.speed_label, value)
             }
@@ -176,11 +180,13 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
 
         val steer = prefs.getInt(KEY_STEER_GAIN, (Drivetrain.DEFAULT_STEER_GAIN * 100).roundToInt())
         steerGain = steer / 100f
+        lineSteer.steerScale = steerGain / Drivetrain.DEFAULT_STEER_GAIN
         binding.steer.progress = steer
         binding.steerLabel.text = getString(R.string.steer_label, steer)
         binding.steer.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar, value: Int, fromUser: Boolean) {
                 steerGain = value / 100f
+                lineSteer.steerScale = steerGain / Drivetrain.DEFAULT_STEER_GAIN
                 binding.steerLabel.text = getString(R.string.steer_label, value)
             }
 
@@ -189,6 +195,18 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
                 prefs.edit().putInt(KEY_STEER_GAIN, sb.progress).apply()
             }
         })
+
+        // Ce a învățat la urmărirea liniei rămâne între porniri; o apăsare lungă pe „Steer” o șterge
+        lineSteer.learnedGain = prefs.getFloat(KEY_LEARN_GAIN, 1f)
+        lineSteer.learnedSpeed = prefs.getFloat(KEY_LEARN_SPEED, 1f)
+        binding.steerLabel.setOnLongClickListener {
+            lineSteer.learnedGain = 1f
+            lineSteer.learnedSpeed = 1f
+            saveLearned()
+            renderStatus()
+            Toast.makeText(this, R.string.learned_reset, Toast.LENGTH_SHORT).show()
+            true
+        }
 
         // Fiecare tip de mașină își ține propriile inversări
         binding.chkInvA.setOnCheckedChangeListener { _, on ->
@@ -241,6 +259,13 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
             updateModeButton()
             renderStatus()
         }
+    }
+
+    private fun saveLearned() {
+        prefs.edit()
+            .putFloat(KEY_LEARN_GAIN, lineSteer.learnedGain)
+            .putFloat(KEY_LEARN_SPEED, lineSteer.learnedSpeed)
+            .apply()
     }
 
     private fun selectVehicle(type: Drivetrain.VehicleType) {
@@ -304,7 +329,15 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         val ports = (if (attachedPorts.isEmpty()) "" else " | motors " + attachedPorts.joinToString(" ") { HubController.portName(it) }) +
             (if (steerText.isEmpty()) "" else " | $steerText")
         if (driveMode == DriveMode.LINE) {
-            val mode = if (autonomous.get()) "AUTO ${lineFollower.mode}" else "manual"
+            val steering = vehicleType == Drivetrain.VehicleType.STEERING
+            val auto = if (steering) "${lineSteer.mode}" else "${lineFollower.mode}"
+            // La tipul 2 arătăm și ce a învățat: cât din viraj și cât din viteză folosește
+            val learned = if (steering) {
+                String.format(Locale.US, " | learned steer %.0f%% speed %.0f%%", lineSteer.learnedGain * 100, lineSteer.learnedSpeed * 100)
+            } else {
+                ""
+            }
+            val mode = (if (autonomous.get()) "AUTO $auto" else "manual") + learned
             val pos = lastLinePos
             val line = if (pos.isNaN()) "no line" else String.format(Locale.US, "line at %+.2f", pos)
             binding.status.text = String.format(Locale.US, "%s%s\n%s | %s", hubText, ports, line, mode)
@@ -323,7 +356,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         val mode = if (autonomous.get()) "AUTO ${avoider.mode}" else "manual"
         val ref = lastRef
         binding.status.text = String.format(
-            Locale.US, "%s%s\nfree L %.2f  C %.2f  R %.2f | %s\npodea Y %.0f U %.0f V %.0f",
+            Locale.US, "%s%s\nfree L %.2f  C %.2f  R %.2f | %s\nfloor Y %.0f U %.0f V %.0f",
             hubText, ports, f[0], f[1], f[2], mode, ref[0], ref[1], ref[2]
         )
     }
@@ -343,6 +376,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         if (vehicleType == Drivetrain.VehicleType.STEERING && steeringRange == null) return
         avoider.reset()
         lineFollower.reset()
+        lineSteer.reset()
         lineDetector.reset()
         objectFollower.reset()
         hub.arm()
@@ -358,6 +392,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         hub.emergencyBrake()
         // STOP oprește și calibrarea; se poate relua din dialogul care apare
         calibrator.cancel()
+        saveLearned()
         if (hub.isReady) hub.setLed(HubController.LED_GREEN)
         updateButtons()
         renderStatus()
@@ -388,10 +423,22 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         lastLinePos = LineFollower.position(r)
 
         if (autonomous.get()) {
-            sendDrive(lineFollower.decide(r, SystemClock.uptimeMillis()))
+            val now = SystemClock.uptimeMillis()
+            if (vehicleType == Drivetrain.VehicleType.STEERING) {
+                sendSteer(lineSteer.decide(r, now))
+            } else {
+                sendDrive(lineFollower.decide(r, now))
+            }
         }
 
         throttledStatus()
+    }
+
+    /** Tipul 2, modul linie: unghiul și viteza vin direct din LineSteerController. */
+    private fun sendSteer(s: Drivetrain.SteerDrive) {
+        val range = steeringRange ?: return
+        val p = Drivetrain.steerPorts(s, range, invertA, invertB)
+        hub.setSteerAndDrive(steerPosition = p.steerPosition, speedB = p.speedB)
     }
 
     private fun sendDrive(d: Avoider.Drive) {
@@ -679,6 +726,8 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         private const val KEY_INV_DRIVE = "inv_b_drive"
         private const val KEY_VEHICLE = "vehicle_type"
         private const val KEY_STEER_GAIN = "steer_gain"
+        private const val KEY_LEARN_GAIN = "learn_steer_gain"
+        private const val KEY_LEARN_SPEED = "learn_steer_speed"
         private const val STATUS_INTERVAL_MS = 150L
         private const val CALIBRATION_TICK_MS = 50L
     }

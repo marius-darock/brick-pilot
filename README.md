@@ -4,7 +4,7 @@ An Android app that turns a phone into the brain of a LEGO Technic robot car.
 The phone looks at the floor through its rear camera, finds obstacles or a line, and drives the
 motors of a Technic Hub 88012 over Bluetooth LE.
 
-Current version: **1.1.0** (versionCode 2).
+Current version: **1.2.0** (versionCode 3).
 
 Two kinds of car are supported:
 
@@ -22,6 +22,7 @@ Two kinds of car are supported:
 | `LineFollower.kt` | Decision for line mode: PD controller, look-ahead at speed, search when the line is lost |
 | `ObjectFollower.kt` | Decision for follow mode: turns towards the closest object, keeps the distance |
 | `Drivetrain.kt` | Turns a drive command into port commands: differential (type 1) or steering + drive (type 2) |
+| `LineSteerController.kt` | Type 2 line mode: delay-compensated steering, speed-scaled angle, auto slow-down, learning |
 | `SteeringCalibrator.kt` | Type 2: finds both steering end stops and the straight-ahead center |
 | `GridOverlayView.kt` | Grid drawn over the camera preview |
 | `MainActivity.kt` | Glue: UI, permissions, camera, car type |
@@ -144,7 +145,40 @@ The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLE
   2 seconds, then stops. If it does not see the line at START, it stays put.
 - The threshold slider does not matter in line mode; the speed slider does. Start with 60..80% speed.
 
-Tuning in `LineFollower.kt`:
+### Line mode on a type 2 car
+
+A steering car follows the line with its own controller (`LineSteerController.kt`). A plain
+proportional controller works at low speed but at high speed it over-corrects: the same wheel angle
+turns the car faster the faster it goes, and the command reaches the wheels late (camera, Bluetooth,
+steering motor, play in the mechanism). The car crosses the line, corrects too much the other way and
+the swings grow until it loses the line. The new controller:
+
+- **predicts where the line will be** when the command reaches the wheels (about 0.3 s ahead), so it
+  straightens the wheels before crossing the line instead of after;
+- **turns the wheels less at higher speed**, so the car turns at the same rate at any speed;
+- **slows down** in curves and when the wheels are turned hard, to have time to correct;
+- **learns**: if the car swings across the line twice within 2.5 s, it lowers its steering strength
+  by 15% and its speed by 10%. After 3 s steady on the line it slowly returns towards the speed you
+  set. If it stays on the same side of the line for a long time in a curve, it steers harder.
+- **remembers** what it learned: the values are saved when you press STOP and loaded on the next
+  start. The status line shows `learned steer N% speed N%`. **Long-press the "Steer" label** to reset
+  them to 100%.
+- when the line leaves the image, it drives slowly forward with the wheels turned towards the side
+  where it saw the line last, for at most 1.5 s, then stops.
+
+The **Speed** and **Steer** sliders still apply. Start with Steer at 180% and let it learn; if it
+still swings, lower Steer.
+
+These behaviours are checked by a simulation in `app/src/test/.../LineSteerTest.kt`: a car model with
+the real delay, a rate-limited steering motor and play in the mechanism. In that model the old
+controller loses the line at high speed, as on the real car, and the new one stays on it at every
+speed.
+
+Tuning in `LineSteerController.kt`: `K_STEER` (how hard it steers), `LATENCY_S` (how far ahead it
+predicts; raise it if it still overshoots), `SPEED_EXPONENT` (how much the angle drops with speed),
+`SLOWDOWN`, `STEER_SLOWDOWN`, and the learning limits `MIN_LEARNED_GAIN`, `MIN_LEARNED_SPEED`.
+
+Tuning in `LineFollower.kt` (type 1):
 - weaves left and right on a straight line: lower `KP`;
 - leaves curves: raise `KP`, lower the speed slider or raise `SLOWDOWN`;
 - reacts too late at high speed: lower `LOOKAHEAD_FROM` so the look-ahead starts at a lower speed;

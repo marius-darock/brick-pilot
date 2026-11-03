@@ -47,7 +47,10 @@ object Drivetrain {
         d: Avoider.Drive, range: SteeringRange, invertA: Boolean, invertB: Boolean,
         gain: Float = DEFAULT_STEER_GAIN
     ): SteerPorts {
-        val s = toSteering(d, gain)
+        return steerPorts(toSteering(d, gain), range, invertA, invertB)
+    }
+
+    fun steerPorts(s: SteerDrive, range: SteeringRange, invertA: Boolean, invertB: Boolean): SteerPorts {
         val steer = if (invertA) -s.steer else s.steer
         return SteerPorts(
             steerPosition = range.center + (steer * range.half).roundToInt(),
