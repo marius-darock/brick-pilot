@@ -64,6 +64,8 @@ class HubController(context: Context, private val listener: Listener) {
     private var lastCommandMs = 0L
     // Ultima poziție trimisă motorului de direcție, ca să nu o retrimitem la fiecare cadru
     private var lastSteer: Int? = null
+    private var lastSpeedA: Int? = null
+    private var lastSpeedB: Int? = null
 
     val isReady get() = state == State.READY
     val isBluetoothEnabled get() = adapter?.isEnabled == true
@@ -98,8 +100,28 @@ class HubController(context: Context, private val listener: Listener) {
         if (!armed || state != State.READY) return@synchronized
         lastCommandMs = SystemClock.uptimeMillis()
         motorsActive = speedA != 0 || speedB != 0
-        enqueue(startSpeed(PORT_A, speedA), PORT_A)
-        enqueue(startSpeed(PORT_B, speedB), PORT_B)
+        sendSpeedA(speedA)
+        sendSpeedB(speedB)
+    }
+
+    // Motorul păstrează ultima comandă; trimitem doar schimbările, ca legătura să rămână liberă
+    private fun sendSpeedA(speed: Int) {
+        if (speed == lastSpeedA) return
+        lastSpeedA = speed
+        enqueue(startSpeed(PORT_A, speed), PORT_A)
+    }
+
+    private fun sendSpeedB(speed: Int) {
+        if (speed == lastSpeedB) return
+        lastSpeedB = speed
+        enqueue(startSpeed(PORT_B, speed), PORT_B)
+    }
+
+    /** După o frână sau deconectare, următoarea comandă trebuie trimisă oricum. */
+    private fun forgetSent() {
+        lastSteer = null
+        lastSpeedA = null
+        lastSpeedB = null
     }
 
     /** Tipul 2: poziția absolută a motorului de direcție (A) și viteza tracțiunii (B). */
@@ -111,7 +133,7 @@ class HubController(context: Context, private val listener: Listener) {
             lastSteer = steerPosition
             enqueue(gotoPosition(PORT_A, steerPosition, STEER_SPEED, STEER_POWER), PORT_A)
         }
-        enqueue(startSpeed(PORT_B, speedB), PORT_B)
+        sendSpeedB(speedB)
     }
 
     // Comenzile de calibrare merg și când modul autonom e oprit
@@ -129,13 +151,14 @@ class HubController(context: Context, private val listener: Listener) {
     fun subscribeFine(port: Int) = enqueue(subscribePosition(port, FINE_DELTA), -1)
 
     /** Cere poziția curentă; răspunsul vine prin onEncoder. */
-    fun requestPosition(port: Int) = enqueue(portValueRequest(port), -1)
+    // Cheie proprie: cererile repetate se înlocuiesc între ele și nu împing comenzile de motor din coadă
+    fun requestPosition(port: Int) = enqueue(portValueRequest(port), REQUEST_KEY + port)
 
     /** Frână activă imediat: golește coada și pune frâna prima. */
     fun emergencyBrake() = synchronized(lock) {
         armed = false
         motorsActive = false
-        lastSteer = null
+        forgetSent()
         lastCommandMs = SystemClock.uptimeMillis()
         ble.post {
             queue.clear()
@@ -239,6 +262,8 @@ class HubController(context: Context, private val listener: Listener) {
                     return@post
                 }
                 characteristic = ch
+                // Interval de conexiune scurt (7.5..15 ms în loc de 30..50 ms): comenzile ajung mai repede la hub
+                g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
                 ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
                 g.setCharacteristicNotification(ch, true)
                 val cccd = ch.getDescriptor(CCCD_UUID)
@@ -267,6 +292,7 @@ class HubController(context: Context, private val listener: Listener) {
 
         override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
             ble.post {
+                if (inFlight) writeStats(timedOut = false)
                 inFlight = false
                 ble.removeCallbacks(writeTimeout)
                 pump()
@@ -285,7 +311,7 @@ class HubController(context: Context, private val listener: Listener) {
     }
 
     private fun onDisconnected(g: BluetoothGatt, message: String) {
-        synchronized(lock) { armed = false; motorsActive = false; lastSteer = null }
+        synchronized(lock) { armed = false; motorsActive = false; forgetSent() }
         g.close()
         gatt = null
         characteristic = null
@@ -347,6 +373,7 @@ class HubController(context: Context, private val listener: Listener) {
         val op = queue.pollFirst() ?: return
         inFlight = true
         if (writeCharacteristic(g, ch, op.data)) {
+            writeStartMs = SystemClock.uptimeMillis()
             ble.postDelayed(writeTimeout, WRITE_TIMEOUT_MS)
         } else {
             // Stiva BLE e ocupată: reîncercăm curând
@@ -358,8 +385,27 @@ class HubController(context: Context, private val listener: Listener) {
 
     // Unele telefoane nu confirmă scrierile fără răspuns; nu blocăm coada
     private val writeTimeout = Runnable {
+        writeStats(timedOut = true)
         inFlight = false
         pump()
+    }
+
+    // Statistici în logcat, ca întârzierea legăturii să se poată măsura pe telefon
+    private var writeStartMs = 0L
+    private var statWrites = 0
+    private var statTimeouts = 0
+    private var statTotalMs = 0L
+
+    private fun writeStats(timedOut: Boolean) {
+        statWrites++
+        if (timedOut) statTimeouts++
+        statTotalMs += SystemClock.uptimeMillis() - writeStartMs
+        if (statWrites >= STATS_EVERY) {
+            Log.d(TAG, "BLE: ${statTotalMs / statWrites} ms/scriere, $statTimeouts fără confirmare din $statWrites, coadă ${queue.size}")
+            statWrites = 0
+            statTimeouts = 0
+            statTotalMs = 0
+        }
     }
 
     private val watchdog = object : Runnable {
@@ -367,7 +413,7 @@ class HubController(context: Context, private val listener: Listener) {
             if (state != State.READY) return
             val stale = synchronized(lock) {
                 val s = motorsActive && SystemClock.uptimeMillis() - lastCommandMs > WATCHDOG_MS
-                if (s) { motorsActive = false; lastSteer = null }
+                if (s) { motorsActive = false; forgetSent() }
                 s
             }
             if (stale) {
@@ -438,12 +484,15 @@ class HubController(context: Context, private val listener: Listener) {
         private const val MTU = 69
         private const val MAX_PENDING = 8
         private const val SCAN_TIMEOUT_MS = 20_000L
-        private const val WRITE_TIMEOUT_MS = 60L
+        // Scrierile fără răspuns pleacă la următorul eveniment de conexiune; nu așteptăm mai mult de atât
+        private const val WRITE_TIMEOUT_MS = 25L
         private const val WATCHDOG_MS = 400L
         private const val WATCHDOG_TICK_MS = 50L
         private const val MAX_POWER = 100
         private const val BRAKE = 127
         private const val HOLD = 126
+        private const val STATS_EVERY = 200
+        private const val REQUEST_KEY = 0x100
         private const val FINE_DELTA = 2
         // Toată puterea: roțile apăsate pe podea fac direcția grea; cursa e oricum limitată de calibrare
         private const val STEER_SPEED = 100

@@ -5,6 +5,7 @@ import android.bluetooth.BluetoothAdapter
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.hardware.camera2.CaptureRequest
 import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Build
@@ -14,12 +15,16 @@ import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
+import android.util.Range
 import android.util.Size
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.SeekBar
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.OptIn
+import androidx.camera.camera2.interop.Camera2Interop
+import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
@@ -477,6 +482,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         override fun runSteer(speed: Int, maxPower: Int) = hub.runLimited(HubController.PORT_A, speed, maxPower)
         override fun brakeSteer() = hub.brakePort(HubController.PORT_A)
         override fun requestSteerPosition() = hub.requestPosition(HubController.PORT_A)
+        override fun onEndFound(position: Int) { Log.i(TAG, "Steering end at $position°") }
         override fun centerSteer(position: Int) = hub.moveTo(HubController.PORT_A, position)
 
         override fun onCalibrated(range: SteeringRange) {
@@ -550,14 +556,18 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
                     ResolutionStrategy(Size(640, 480), ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER)
                 )
                 .build()
-            val analysis = ImageAnalysis.Builder()
+            val analysisBuilder = ImageAnalysis.Builder()
                 .setResolutionSelector(analysisSelector)
                 .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                 .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-                .build()
+            fixFrameRate(analysisBuilder)
+            val analysis = analysisBuilder.build()
             // Fiecare cadru merge la viziunea modului curent
             analysis.setAnalyzer(cameraExecutor) { image ->
+                val ageNs = SystemClock.elapsedRealtimeNanos() - image.imageInfo.timestamp
+                val start = SystemClock.uptimeMillis()
                 if (driveMode == DriveMode.LINE) lineDetector.analyze(image) else analyzer.analyze(image)
+                frameStats(ageNs / 1_000_000, SystemClock.uptimeMillis() - start)
             }
             previewUseCase = preview
             analysisUseCase = analysis
@@ -571,6 +581,38 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
                 cameraStarted = false
             }
         }, ContextCompat.getMainExecutor(this))
+    }
+
+    // În lumină slabă camera coboară singură la 15 cadre/s sau mai puțin, adică o reacție de două ori mai lentă
+    @OptIn(ExperimentalCamera2Interop::class)
+    private fun fixFrameRate(builder: ImageAnalysis.Builder) {
+        Camera2Interop.Extender(builder)
+            .setCaptureRequestOption(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, Range(30, 30))
+    }
+
+    // Statistici în logcat: cadre pe secundă, vechimea cadrului la analiză și durata analizei
+    private var statFrames = 0
+    private var statAgeMs = 0L
+    private var statWorkMs = 0L
+    private var statStartMs = 0L
+
+    private fun frameStats(ageMs: Long, workMs: Long) {
+        val now = SystemClock.uptimeMillis()
+        if (statStartMs == 0L) statStartMs = now
+        statFrames++
+        statAgeMs += ageMs
+        statWorkMs += workMs
+        if (now - statStartMs >= 3000) {
+            Log.d(
+                TAG, "Cameră: %.1f cadre/s, cadru vechi de %d ms, analiză %d ms".format(
+                    Locale.US, statFrames * 1000f / (now - statStartMs), statAgeMs / statFrames, statWorkMs / statFrames
+                )
+            )
+            statFrames = 0
+            statAgeMs = 0
+            statWorkMs = 0
+            statStartMs = now
+        }
     }
 
     // ---------------- Permisiuni ----------------

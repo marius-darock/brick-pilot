@@ -32,7 +32,9 @@ class LineFollower {
     }
 
     fun decide(r: LineResult, nowMs: Long): Avoider.Drive {
-        val raw = position(r)
+        // La viteză mare contează mai mult benzile îndepărtate: robotul reacționează la curbă înainte să ajungă în ea
+        val lookahead = ((speedFactor - LOOKAHEAD_FROM) / LOOKAHEAD_SPAN).coerceIn(0f, 1f)
+        val raw = position(r, lookahead)
         if (raw.isNaN()) {
             lastMs = 0L
             filtered = Float.NaN
@@ -69,27 +71,33 @@ class LineFollower {
     companion object {
         // Ponderi pe benzi, de jos în sus (aceeași ordine ca LineDetector.BAND_Y)
         val BAND_WEIGHTS = floatArrayOf(0.35f, 0.25f, 0.2f, 0.12f, 0.08f)
+        // Ponderile la viteză maximă: privirea merge spre benzile de sus
+        val FAR_WEIGHTS = floatArrayOf(0.1f, 0.15f, 0.2f, 0.25f, 0.3f)
+        const val LOOKAHEAD_FROM = 0.8f
+        const val LOOKAHEAD_SPAN = 1.0f
 
         const val BASE_FORWARD = 30
         const val SLOWDOWN = 0.6f
         const val KP = 45f
         const val KD = 3f
         const val MAX_TURN = 45
-        const val SMOOTHING = 0.6f
+        // Netezire ușoară: mai mult ar întârzia reacția cu câteva cadre
+        const val SMOOTHING = 0.85f
         const val SIDE_DEADBAND = 0.1f
         const val SEARCH_TURN = 35
         const val SEARCH_MS = 2000L
 
         /** Poziția ponderată a liniei, NaN dacă nu e pe nicio bandă. */
-        fun position(r: LineResult): Float {
+        fun position(r: LineResult, lookahead: Float = 0f): Float {
             // Benzile apropiate contează mai mult, cele îndepărtate anticipează curbele
             var sum = 0f
             var weights = 0f
             for (b in r.positions.indices) {
                 val p = r.positions[b]
                 if (p.isNaN()) continue
-                sum += p * BAND_WEIGHTS[b]
-                weights += BAND_WEIGHTS[b]
+                val w = BAND_WEIGHTS[b] + (FAR_WEIGHTS[b] - BAND_WEIGHTS[b]) * lookahead
+                sum += p * w
+                weights += w
             }
             return if (weights == 0f) Float.NaN else sum / weights
         }

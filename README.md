@@ -1,23 +1,30 @@
 # BrickPilot
 
-Aplicație Android care transformă un Samsung Galaxy S21 FE în creierul unui robot LEGO Technic.
-Telefonul vede podeaua prin camera spate, detectează obstacolele și comandă prin Bluetooth LE
-două motoare 88008 conectate la un Technic Hub 88012.
+An Android app that turns a phone into the brain of a LEGO Technic robot car.
+The phone looks at the floor through its rear camera, finds obstacles or a line, and drives the
+motors of a Technic Hub 88012 over Bluetooth LE.
 
-## Structura codului
+Current version: **1.1.0** (versionCode 2).
 
-| Fișier | Rol |
+Two kinds of car are supported:
+
+- **Type 1, differential**: two motors on the rear wheels, steering by speed difference.
+- **Type 2, steering**: a front steering motor (A) and a drive motor (B).
+
+## Code layout
+
+| File | Role |
 |---|---|
-| `HubController.kt` | BLE: scanare, GATT, coadă de scrieri, watchdog, mesaje LWP |
-| `FloorAnalyzer.kt` | Viziune: grila 9x7 în YUV, referința de podea, free[3] |
-| `Avoider.kt` | Decizie: mers, încetinire, rotire pe loc, mixare pe motoare |
-| `LineDetector.kt` | Viziune pentru modul linie: poziția liniei negre pe 5 benzi |
-| `LineFollower.kt` | Decizie pentru modul linie: regulator PD, căutare când linia se pierde |
-| `ObjectFollower.kt` | Decizie pentru modul urmărire: virează spre cel mai apropiat obiect, păstrează distanța |
-| `Drivetrain.kt` | Comanda de mers pe porturi: diferențial (tip 1) sau direcție + tracțiune (tip 2) |
-| `SteeringCalibrator.kt` | Tipul 2: găsește capetele virajului și centrul direcției |
-| `GridOverlayView.kt` | Desenul grilei peste preview |
-| `MainActivity.kt` | Legătura dintre toate, UI, permisiuni, cameră |
+| `HubController.kt` | BLE: scan, GATT, write queue, watchdog, LWP messages |
+| `FloorAnalyzer.kt` | Vision: 9x7 grid in YUV, floor reference, free[3] |
+| `Avoider.kt` | Decision: drive, slow down, spin in place, motor mixing |
+| `LineDetector.kt` | Vision for line mode: black line position on 5 bands |
+| `LineFollower.kt` | Decision for line mode: PD controller, look-ahead at speed, search when the line is lost |
+| `ObjectFollower.kt` | Decision for follow mode: turns towards the closest object, keeps the distance |
+| `Drivetrain.kt` | Turns a drive command into port commands: differential (type 1) or steering + drive (type 2) |
+| `SteeringCalibrator.kt` | Type 2: finds both steering end stops and the straight-ahead center |
+| `GridOverlayView.kt` | Grid drawn over the camera preview |
+| `MainActivity.kt` | Glue: UI, permissions, camera, car type |
 
 ## Build
 
@@ -27,158 +34,216 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n ro.awebdesign.brickpilot/.MainActivity
 ```
 
-Necesită JDK 17 și Android SDK 36 (`local.properties` indică locația SDK-ului).
+Needs JDK 17 and Android SDK 36 (`local.properties` points to the SDK).
 
-Teste: `./gradlew testDebugUnitTest`.
+Tests: `./gradlew testDebugUnitTest`.
 
 ## Google Play
 
-- Build pentru magazin: `./gradlew bundleRelease`, rezultă `app/build/outputs/bundle/release/app-release.aab`.
-- Semnarea folosește `upload-keystore.jks` și `keystore.properties` din rădăcina proiectului. Ambele sunt
-  excluse din git. **Fă-le copie de rezervă**: fără ele nu mai poți publica actualizări.
-- La fiecare versiune nouă crește `versionCode` (și `versionName`) în `app/build.gradle.kts`.
-- Texte, grafică și răspunsuri pentru formularele din Play Console: folderul `play-store/`.
-- Numele din magazin nu conține „LEGO”: e marcă înregistrată. Marca apare doar în descriere, cu nota că
-  aplicația nu e oficială.
+- Store build: `./gradlew bundleRelease`, output in `app/build/outputs/bundle/release/app-release.aab`.
+- Signing uses `upload-keystore.jks` and `keystore.properties` in the project root. Both are kept out
+  of git. **Back them up**: without them you cannot publish updates.
+- For every new release raise `versionCode` (and `versionName`) in `app/build.gradle.kts`.
+- Store texts, graphics and Play Console form answers: the `play-store/` folder.
+- The store name does not contain "LEGO", which is a registered trademark. The brand only appears in
+  the description, together with a note that the app is not official.
 
-## Pornirea robotului
+## All texts are in English
 
-1. Motoarele de tracțiune sunt în față: **A = motorul stâng**, **B = motorul drept**. Baterii noi în hub.
-   Asocierea e în `Drivetrain.kt`.
-2. Telefonul în suport, landscape, camera spate înainte, înclinată ~30 de grade în jos.
-3. Pornește aplicația și acceptă permisiunile (cameră, Bluetooth).
-4. Apasă **CONNECT**, apoi ține apăsat butonul verde de pe hub până clipește alb.
-   La conectare butonul devine **DISCONNECT**, LED-ul hubului se face verde, iar sus apar porturile cu motor.
-   Apăsat din nou, frânează motoarele și închide conexiunea.
-5. Pune robotul pe podea liberă și verifică grila: în fața roților celulele trebuie să fie verzi,
-   obstacolele roșii. Chenarul galben e podeaua de referință și trebuie să cadă pe podea curată.
-6. Apasă **START** (LED albastru). **STOP** frânează imediat și iese din modul autonom.
+Buttons, dialogs and status messages are in English (`app/src/main/res/values/strings.xml` and the
+status lines in the Kotlin code). Code comments stay in Romanian.
 
-## Tipul mașinii
+## Starting the robot
 
-La prima pornire aplicația cere tipul mașinii și îl ține minte. Se schimbă din butonul mic **TYPE** din colțul stânga-jos, doar deconectat:
+1. Fresh batteries in the hub. Plug the motors in as described for your car type below.
+2. Phone in its holder, landscape, rear camera facing forward, tilted about 30 degrees down.
+3. Start the app and accept the permissions (camera, Bluetooth).
+4. On the first start, pick the car type (see below).
+5. Tap **CONNECT**, then hold the green button on the hub until it blinks white.
+   Once connected the button turns into **DISCONNECT**, the hub LED goes green and the ports with a
+   motor are shown at the top. Tapping it again brakes the motors and closes the connection.
+6. Type 2 only: wait for the steering calibration to finish (`steering ±N°` in the status).
+7. Put the robot on free floor and check the grid: cells in front of the wheels should be green,
+   obstacles red. The yellow box is the floor reference and must sit on clean floor.
+8. Tap **START** (blue LED). **STOP** brakes at once and leaves autonomous mode.
 
-- **Tip 1, diferențial**: A = roata spate stângă, B = roata spate dreaptă; virează prin diferența de viteză.
-- **Tip 2, direcție**: A = motorul de direcție din față, B = motorul de tracțiune.
-  După **CONNECT**, motorul A merge încet, cu putere mică, până în capătul din stânga, apoi în cel din dreapta,
-  și se oprește la mijloc. Cursa folosită rămâne cu ~15% înaintea capetelor, ca mecanismul să nu forțeze.
-  **START** devine activ doar după calibrare; dacă eșuează, apare un dialog cu **Retry**.
-  Direcția are nevoie de opritori fizici stânga-dreapta; fără ei calibrarea expiră după 4 secunde.
-  Mașina nu se poate roti pe loc, așa că rotirea din modurile autonome devine mers înapoi cu roțile bracate invers.
-  Dacă virează în partea greșită, bifează **Inv. A steering**; dacă merge înapoi, **Inv. B drive**.
+## Car type
 
-## Modul linie (urmărește o linie neagră)
+The app asks for the car type on the first start and remembers it. To change it later, tap the small
+**TYPE** button in the bottom-left corner (only while disconnected). Each type keeps its own invert
+settings.
 
-Butonul mov de sub CONNECT trece prin cele trei moduri: **MODE: OBSTACLES**, **MODE: LINE**,
-**MODE: FOLLOW**. Modul se salvează.
-Schimbarea modului în timpul mersului oprește robotul.
+### Type 1, differential
 
-- Linia: bandă izolieră neagră sau bandă adezivă neagră, 1,5..3 cm lățime, pe podea deschisă la culoare.
-  Contează contrastul: pe parchet închis la culoare linia neagră nu se vede bine.
-- Pe ecran apar 5 benzi orizontale. Punctul galben de pe fiecare bandă e locul unde a găsit linia;
-  liniile galbene le unesc. Un chenar roșu în jurul imaginii înseamnă că linia nu se vede.
-- Linia e căutată de jos în sus: pe fiecare bandă se alege segmentul închis aflat lângă cel de pe banda
-  de dedesubt. Un obiect închis la culoare din altă parte a imaginii e ignorat, la fel rosturile de
-  parchet (prea înguste) și umbrele mari (prea late).
-- Robotul virează spre linie proporțional cu cât e de departe de centru și încetinește în curbe.
-- Dacă linia iese din imagine, se rotește spre partea unde a văzut-o ultima dată, cel mult 2 secunde,
-  apoi se oprește pe loc. Dacă la START nu vede linia, stă pe loc.
-- Pragul din slider nu contează în modul linie; sliderul de viteză da. Începe cu viteza la 60..80%.
+- **A = rear left motor**, **B = rear right motor**. The car turns by driving the wheels at different
+  speeds and spins in place when needed.
+- Checkboxes **Inv. A left** (checked by default) and **Inv. B right** (unchecked by default).
 
-Reglaje în `LineFollower.kt`:
-- oscilează stânga-dreapta pe linie dreaptă: scade `KP`;
-- iese din curbe: crește `KP`, scade viteza din slider sau crește `SLOWDOWN`;
-- caută prea puțin sau prea mult după ce pierde linia: `SEARCH_MS`, `SEARCH_TURN`.
+### Type 2, steering
 
-În `LineDetector.kt`: `MIN_CONTRAST` (cât de închisă trebuie să fie linia față de podea), `MIN_WIDTH`
-și `MAX_WIDTH` (ce lățimi acceptă), `MAX_JUMP` (cât se poate muta linia între două benzi vecine).
+- **A = front steering motor**, **B = drive motor**.
+- **Steering calibration runs on every CONNECT**, for type 2 only:
+  1. motor A turns the wheels all the way left until the end stop,
+  2. then all the way right until the other end stop,
+  3. the middle of the two ends is stored as the straight-ahead reference and the wheels go there.
 
-## Oprire
+  The ends are detected from the motor encoder. The app asks for the position on every step
+  (every 50 ms) and keeps the furthest point reached, so a slow or stiff mechanism is followed all the
+  way to the stop. An end counts as reached when the motor moves less than 6° in 400 ms. While
+  driving, the wheels use 95% of the half travel and always stay at least 3° away from the stops, so
+  the mechanism is never forced.
+- **START** is enabled only after a successful calibration. If it fails, a dialog offers **Retry**.
+  The steering needs physical left and right end stops; without them calibration gives up after
+  8 seconds.
+- **Steer** slider (bottom right, 100..400%, default 180%): how hard the wheels turn for the same
+  command. A steering car turns wider than a differential one, so raise it if the car does not turn
+  enough (220..250% works well for a stiff mechanism), lower it if it weaves on a straight line.
+- The steering motor runs at full speed and power while driving, so it reaches the requested angle
+  even with the wheels pressed on the floor.
+- The car cannot spin in place, so the spins of the autonomous modes become reversing with the
+  wheels turned the opposite way, like a three-point turn. The camera does not see behind the car
+  during those manoeuvres.
+- If the car turns the wrong way, check **Inv. A steering**; if it drives backwards, check
+  **Inv. B drive**.
 
-- Butonul **STOP** ocupă toată coloana din dreapta.
-- Cât robotul merge singur, o atingere oriunde pe imaginea camerei îl oprește la fel ca STOP.
+## Reaction time
 
-## Siguranță
+The time from the camera seeing something to the motors reacting is kept short:
 
-- Watchdog: fără comandă nouă 400 ms, ambele motoare frânează.
-- La ieșirea din aplicație (onPause) robotul frânează.
-- Coada BLE are maxim 8 mesaje; cele vechi sunt aruncate, iar comenzile noi pentru același port le înlocuiesc pe cele neexpediate.
+- The Bluetooth connection asks for the high priority interval (7.5..15 ms instead of 30..50 ms).
+- Only commands that change are sent; the same speed is not resent on every frame.
+- An unconfirmed write waits at most 25 ms before the next one goes out.
+- The camera is locked at 30 frames per second, so it does not drop to 15 fps in dim rooms.
+- In line mode the line position is only lightly smoothed, and above 80% speed the far bands count
+  more, so the car starts a curve before it reaches it.
 
-## Dacă merge strâmb
+To measure it on a phone, read the log while driving:
 
-**Robotul merge înapoi sau se rotește pe loc când ar trebui să meargă drept.**
-Porturile sunt fixe în cod: **A = motorul stâng**, **B = motorul drept** (privind în direcția în care
-se uită camera). Dacă ai cablurile invers, schimbă-le fizic între porturi.
+```bash
+adb logcat -s BrickPilot
+```
 
-Sus dreapta sunt două bife, salvate automat pe fiecare telefon:
-- **Inv. A left** (implicit bifată) și **Inv. B right** (implicit nebifată): sensul fiecărui motor.
-  Motoarele sunt montate în oglindă, deci exact una trebuie bifată.
-- se rotește pe loc la START pe drum liber: sunt bifate ambele sau niciuna; lasă una bifată;
-- merge înapoi: mută bifa pe celălalt motor.
+It prints the camera frame rate, how old a frame is when it is analysed, the average Bluetooth write
+time and the steering calibration results.
 
-Bifele schimbă doar sensul de mers; virajul iese corect singur, din porturi. Sensurile sunt verificate
-de testele automate din `app/src/test` (`./gradlew testDebugUnitTest`).
+## Line mode (follows a black line)
 
-**Tracțiunea e în față.** Robotul virează prin diferența de viteză dintre roțile din față, iar roțile
-din spate alunecă lateral. Dacă roțile din spate sunt fixe și au aderență mare, rotirea pe loc poate
-fi greoaie. Atunci ajută anvelope mai netede în spate sau mărirea lui `SPIN_TURN` în `Avoider.kt`.
+The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLES**, **MODE: LINE**,
+**MODE: FOLLOW**. The mode is saved. Changing the mode while driving stops the robot.
 
-**Cum decide ce e podea.** Podeaua e urmărită pornind de la chenarul galben: rândul de jos din centru
-spre margini, apoi fiecare coloană de jos în sus. O celulă e podea dacă seamănă cu podeaua de lângă ea,
-deci reflexiile pe parchet lucios și umbrele largi (care se schimbă treptat) rămân podea, iar marginile
-obiectelor (schimbare bruscă) devin obstacol. Numărul din celulă e diferența comparată cu pragul.
+- The line: black electrical tape or black adhesive tape, 1.5..3 cm wide, on a light floor.
+  Contrast is what matters: on dark parquet a black line is hard to see.
+- Five horizontal bands are shown on screen. The yellow dot on each band is where the line was found;
+  yellow lines join them. A red frame around the image means the line is not visible.
+- The line is searched from the bottom up: on each band the dark segment next to the one on the band
+  below is chosen. A dark object elsewhere in the image is ignored, and so are parquet joints (too
+  narrow) and large shadows (too wide).
+- The robot turns towards the line in proportion to how far it is from the center and slows down in
+  curves.
+- If the line leaves the image, it turns towards the side where it saw the line last, for at most
+  2 seconds, then stops. If it does not see the line at START, it stays put.
+- The threshold slider does not matter in line mode; the speed slider does. Start with 60..80% speed.
 
-**Vede obstacole peste tot (prea mult roșu).** Crește pragul din slider (jos). Pe covoare cu model, 20..30.
+Tuning in `LineFollower.kt`:
+- weaves left and right on a straight line: lower `KP`;
+- leaves curves: raise `KP`, lower the speed slider or raise `SLOWDOWN`;
+- reacts too late at high speed: lower `LOOKAHEAD_FROM` so the look-ahead starts at a lower speed;
+- searches too little or too long after losing the line: `SEARCH_MS`, `SEARCH_TURN`.
 
-**Liniile de parchet.** Fiecare celulă folosește mediana celor 25 de eșantioane, deci o linie subțire
-dintre plăci nu contează. O celulă peste prag, dar fără nicio vecină peste prag, e ignorată (rămâne verde).
-Numărul din celulă e distanța reală, deci poate depăși pragul chiar dacă celula e verde.
-Dacă plăcile au nuanțe foarte diferite între ele, crește pragul.
+In `LineDetector.kt`: `MIN_CONTRAST` (how much darker than the floor the line must be), `MIN_WIDTH`
+and `MAX_WIDTH` (accepted widths), `MAX_JUMP` (how far the line may move between two neighbouring
+bands).
 
-**Intră în obstacole (prea mult verde).** Scade pragul. Pe parchet uniform merge și 8..12.
-Obstacolele de aceeași culoare cu podeaua nu pot fi văzute de algoritm, oricât ai regla.
+## Stopping
 
-**Înclinarea camerei.** Primii 35% din cadru sunt ignorați. Rândul de jos al grilei trebuie
-să fie podeaua imediat din fața roților.
-- Dacă în grilă apar pereții îndepărtați sau mobila, înclină camera mai mult în jos.
-- Dacă rândul de jos arată bara de protecție a robotului, înclină camera mai puțin sau mut-o mai în față.
+- The **STOP** button fills the whole right column.
+- While the robot drives on its own, a touch anywhere on the camera image stops it just like STOP.
+- STOP also stops a running steering calibration; the dialog then offers **Retry**.
 
-**Viteza.** Sliderul „Speed” (jos dreapta, 40..200%) scalează toate mișcările în toate modurile:
-mers, viraje, mers înapoi și rotire. Se salvează automat.
+## Safety
 
-**Ce face în fața unui obstacol (modul OBSTACOLE).**
-1. Drum liber: merge înainte și virează ușor spre partea mai liberă.
-2. Obstacol la distanță medie: încetinește și virează spre partea mai liberă.
-3. Centrul blocat: se rotește pe loc 0,8 s spre partea mai liberă, fără întrerupere (`AUTO SPIN`).
-4. **Colț:** dacă se blochează din nou în mai puțin de 2 s după o rotire, nu mai schimbă partea,
-   se rotește tot în aceeași direcție, deci nu mai face stânga-dreapta. La al treilea blocaj la rând
-   dă înapoi (`AUTO ESCAPE_BACK`) și face o rotire lungă, cam o jumătate de tură (`AUTO ESCAPE_SPIN`).
+- Watchdog: with no new command for 400 ms, both motors brake.
+- Leaving the app (onPause) brakes the robot.
+- The BLE queue holds at most 8 messages; old ones are dropped, and a new command for a port replaces
+  the one not yet sent.
 
-Duratele sunt pentru viteza 100%. La altă viteză se ajustează automat (la 50% durează dublu), ca
-unghiul de rotire și distanța de mers înapoi să rămână aceleași.
+## If it drives badly
 
-**Reglaje ocolire**, în `Avoider.kt`:
-- se întoarce prea mult sau prea puțin la un obstacol: `SPIN_MS`;
-- nu iese din colțuri: crește `ESCAPE_SPIN_MS` sau `ESCAPE_BACK_MS`;
-- intră prea repede în modul de colț: scade `CORNER_WINDOW_MS` sau crește `ESCAPE_AFTER`;
-- virează prea brusc în mers: `CRUISE_GAIN`, `SLOW_TURN`.
+**Type 1: the robot drives backwards or spins in place when it should go straight.**
+The ports are fixed in code: **A = left motor**, **B = right motor** (looking in the direction the
+camera faces). If your cables are swapped, swap them on the hub.
 
-## Modul urmărire (urmărește un obiect)
+The two checkboxes at the top right are saved automatically on each phone:
+- **Inv. A left** (checked by default) and **Inv. B right** (unchecked by default): the direction of
+  each motor. The motors are mounted mirrored, so exactly one should be checked.
+- spins in place at START on a free floor: both or neither are checked; leave one checked;
+- drives backwards: move the check to the other motor.
 
-Folosește aceeași grilă ca modul obstacole. Ținta e cel mai apropiat obiect (celulele roșii cele mai
-de jos). Robotul virează spre el și păstrează o distanță de ~2 rânduri libere din grilă: merge înainte
-când obiectul se îndepărtează și stă pe loc când nu vede nimic.
+The checkboxes only change the driving direction; steering follows from the ports. The directions are
+covered by the unit tests in `app/src/test` (`./gradlew testDebugUnitTest`).
 
-Dă înapoi doar dacă obiectul din centrul imaginii vine spre el, cel mult 1,5 secunde la rând. Un lucru
-apropiat din marginea imaginii (de exemplu o roată a robotului) nu îl mai face să dea înapoi, doar
-să se întoarcă spre el.
+**Type 2: the car does not turn enough.** Check the `steering ±N°` value after calibration. If it is
+small, the calibration did not reach the end stops: look at the "Steering end at" lines in the log.
+If it is large and the car still turns too little, raise the **Steer** slider.
 
-- Merge bine cu un obiect de altă culoare decât podeaua (o minge, o cutie, picioarele cuiva).
-- Nu lăsa obiectul să ajungă pe chenarul galben: acolo e podeaua de referință și detecția se strică.
-- Pragul și viteza din slider se aplică și aici.
-- Reglaje în `ObjectFollower.kt`: `TARGET_DISTANCE` (distanța păstrată), `KF` (cât de repede se apropie),
-  `KT` (cât de tare virează spre țintă), `MAX_FORWARD`, `MAX_BACK`, `MAX_BACK_MS` (cât poate da înapoi
-  la rând), `BACK_MAX_BEARING` (cât de centrată trebuie să fie ținta ca să dea înapoi).
+**How it decides what is floor.** The floor is traced starting from the yellow box: the bottom row
+from the center outwards, then each column from the bottom up. A cell is floor if it looks like the
+floor next to it, so reflections on glossy parquet and wide shadows (which change gradually) stay
+floor, while object edges (sudden change) become obstacles. The number in a cell is the difference
+compared with the threshold.
 
-**Hubul nu e găsit.** Hubul se vede doar cât timp clipește alb. Apasă CONNECT, apoi ține butonul verde.
-Scanarea se oprește după 20 de secunde.
+**Sees obstacles everywhere (too much red).** Raise the threshold slider (bottom). On patterned
+carpets, 20..30.
+
+**Parquet joints.** Each cell uses the median of 25 samples, so a thin line between boards does not
+count. A cell over the threshold with no neighbour over the threshold is ignored (stays green).
+The number in a cell is the real distance, so it can exceed the threshold even when the cell is green.
+If the boards have very different shades, raise the threshold.
+
+**Drives into obstacles (too much green).** Lower the threshold. On even parquet 8..12 works too.
+Obstacles of the same colour as the floor cannot be seen by the algorithm, however you tune it.
+
+**Camera tilt.** The top 35% of the frame is ignored. The bottom row of the grid should be the floor
+right in front of the wheels.
+- If distant walls or furniture show up in the grid, tilt the camera further down.
+- If the bottom row shows the robot's bumper, tilt the camera less or move it further forward.
+
+**Speed.** The **Speed** slider (bottom, 40..200%) scales every movement in every mode: driving,
+turning, reversing and spinning. It is saved automatically.
+
+**What it does in front of an obstacle (OBSTACLES mode).**
+1. Free road: drives forward and steers gently towards the freer side.
+2. Obstacle at medium distance: slows down and turns towards the freer side.
+3. Center blocked: spins in place for 0.8 s towards the freer side, without interruption (`AUTO SPIN`).
+4. **Corner:** if it gets blocked again less than 2 s after a spin, it keeps the same direction
+   instead of going left-right. On the third block in a row it reverses (`AUTO ESCAPE_BACK`) and makes
+   a long spin, about half a turn (`AUTO ESCAPE_SPIN`).
+
+Durations are for 100% speed. At other speeds they adjust automatically (at 50% they last twice as
+long), so the spin angle and reversing distance stay the same.
+
+**Obstacle tuning**, in `Avoider.kt`:
+- turns too much or too little at an obstacle: `SPIN_MS`;
+- does not get out of corners: raise `ESCAPE_SPIN_MS` or `ESCAPE_BACK_MS`;
+- enters corner mode too soon: lower `CORNER_WINDOW_MS` or raise `ESCAPE_AFTER`;
+- turns too sharply while driving: `CRUISE_GAIN`, `SLOW_TURN`.
+
+## Follow mode (follows an object)
+
+Uses the same grid as obstacle mode. The target is the closest object (the lowest red cells). The
+robot turns towards it and keeps a distance of about 2 free grid rows: it drives forward when the
+object moves away and stays put when it sees nothing.
+
+It reverses only if the object in the middle of the image comes towards it, for at most 1.5 seconds
+in a row. Something close at the edge of the image (for example one of the robot's wheels) no longer
+makes it reverse, only turn towards it.
+
+- Works well with an object of a different colour than the floor (a ball, a box, someone's feet).
+- Do not let the object reach the yellow box: that is the floor reference and detection breaks.
+- The threshold and speed sliders apply here too.
+- Tuning in `ObjectFollower.kt`: `TARGET_DISTANCE` (distance kept), `KF` (how fast it closes in),
+  `KT` (how hard it turns towards the target), `MAX_FORWARD`, `MAX_BACK`, `MAX_BACK_MS` (how long it
+  may reverse in a row), `BACK_MAX_BEARING` (how centered the target must be for it to reverse).
+
+**Hub not found.** The hub is only visible while it blinks white. Tap CONNECT, then hold the green
+button. Scanning stops after 20 seconds.

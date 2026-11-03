@@ -122,9 +122,50 @@ class SteeringTest {
         assertNull(f.failure)
         val r = f.range!!
         assertEquals(-30, r.center)
-        assertTrue(r.half in 60..85)
+        // Cursa reală e de 180°: folosim aproape toată jumătatea, dar nu până în opritor
+        assertTrue(r.half in 80..87)
         assertEquals(r.center, f.centered)
         assertEquals(SteeringCalibrator.Phase.DONE, c.phase)
+    }
+
+    @Test
+    fun springyEndStopStillCountsAsEnd() {
+        // În opritor mecanismul se arcuiește și encoderul tremură cu 2 grade; capătul trebuie găsit totuși
+        val f = FakeSteer()
+        val c = SteeringCalibrator(f)
+        var now = 0L
+        var tick = 0
+        c.start(now)
+        while (c.isRunning && now < 20_000) {
+            now += 20
+            f.step()
+            val wobble = if (f.pos == -120 || f.pos == 60) (tick++ % 3) - 1 else 0
+            c.onPosition(f.pos + wobble * 2, now)
+            c.tick(now)
+        }
+        assertNull(f.failure)
+        assertEquals(-30, f.range!!.center, 3)
+    }
+
+    private fun assertEquals(expected: Int, actual: Int, delta: Int) =
+        assertTrue("$actual nu e în $expected±$delta", abs(actual - expected) <= delta)
+
+    @Test
+    fun lateNotificationsDoNotStopHalfway() {
+        // Poziția vine doar din când în când; între ele motorul nu trebuie considerat oprit
+        val f = FakeSteer()
+        val c = SteeringCalibrator(f)
+        var now = 0L
+        c.start(now)
+        c.onPosition(0, now)
+        while (c.isRunning && now < 20_000) {
+            now += 20
+            f.step()
+            if (now % 300 == 0L) c.onPosition(f.pos, now)
+            c.tick(now)
+        }
+        assertNull(f.failure)
+        assertEquals(-30, f.range!!.center, 6)
     }
 
     @Test
