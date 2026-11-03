@@ -62,38 +62,54 @@ LEGO® este marcă înregistrată a LEGO Group, care nu sponsorizează, nu autor
 BrickPilot: Robot Autopilot
 
 ### Short description (max 80)
-Turn your phone into a robot brain: avoid obstacles, follow lines and objects.
+Your phone drives the robot car: avoids obstacles, follows lines and objects.
 
 ### Full description (max 4000)
-BrickPilot turns your phone into the brain of a robot built from construction bricks. The phone rides on the robot, looks through the rear camera and drives the motors over Bluetooth. All the intelligence runs on the phone, with no internet and no account.
+BrickPilot turns your Android phone into the brain of a robot car built with LEGO® Technic and Powered Up parts. The phone rides on the car, looks ahead through its rear camera and drives the motors over Bluetooth. Everything runs on the phone: no internet, no account, no ads.
+
+TWO KINDS OF CAR
+Pick your chassis when the app starts; change it any time with the small TYPE button.
+• Type 1, differential drive: two motors on the rear wheels, left on port A and right on port B. The car steers by driving the wheels at different speeds and can spin in place.
+• Type 2, real steering: a steering motor at the front on port A and a drive motor on port B. On every connect the app calibrates the steering by itself: full left, full right, then it centres the wheels and uses that as straight ahead. It never pushes the steering against its end stops.
 
 THREE DRIVING MODES
-• Obstacle avoidance: the robot drives using the camera, sees walls, doors and furniture and steers around them on its own. It gets out of corners too.
-• Line following: put black electrical tape on the floor and the robot follows it, curves included.
-• Object following: the robot turns towards the nearest object and follows it, keeping its distance.
+• Obstacle avoidance: drives around walls, doors and furniture and gets itself out of corners.
+• Line following: stick black tape on the floor and the car follows it through curves. Stray marks and lines at the side are ignored, and if the car loses the line it reverses along its own path to find it again.
+• Object following: the car locks onto an object by its colour (a ball, a box, a toy) and follows it, keeping its distance. Walls and furniture no longer steal the target.
+
+SMART STEERING FOR TYPE 2 CARS
+A steering car tends to over-correct at speed. BrickPilot predicts where the line will be when the wheels react, turns the wheels less at higher speed, slows down in sharp curves and learns from its own swings. What it learns is saved for the next run.
 
 SEE WHAT THE ROBOT SEES
-The camera view shows exactly what the robot sees: a grid with free floor in green and obstacles in red, or the points where it found the line. Calibrate it right on your own floor: carpet, parquet or tiles.
+The camera view shows free floor in green and obstacles in red, the line it is following, or a box around the target it is chasing. Tune it right on your own floor: carpet, parquet or tiles.
 
 TUNE IT WITHOUT CODING
 • Detection threshold for different floors
-• Adjustable speed
-• Reverse each motor's direction to match any build
-• Big STOP button; tapping the camera view stops the robot as well
+• Speed and steering strength sliders
+• Reverse any motor to match your build
+• Landscape or portrait: the screen follows however the phone is mounted
+• Big STOP button; tapping the camera view stops the car too
 
 SAFETY
-Motors brake automatically if the app stops sending commands, when you leave the app, or when you press STOP.
+The motors brake if the app stops sending commands, when you leave the app or when you press STOP.
+
+COMPATIBLE LEGO® HUBS
+BrickPilot works with LEGO® hubs that use the LEGO® Wireless Protocol (Powered Up / Control+):
+• LEGO® Technic Hub 88012 (Control+), tested on real cars of both types
+• LEGO® Powered Up Hub 88009, same protocol and ports
+• LEGO® BOOST Move Hub 88006, type 1 with its built-in motors
+Motors: Powered Up / Control+ motors with a built-in rotation sensor, such as the Technic L and XL motors, on ports A and B.
+LEGO® SPIKE™, MINDSTORMS® and WeDo 2.0 hubs use a different protocol and are not supported.
 
 WHAT YOU NEED
-• A Bluetooth hub that speaks the LEGO® Wireless Protocol (tested with the LEGO® Technic Hub 88012)
-• Two motors with encoders on ports A (left) and B (right)
-• A mount that holds the phone on the robot, rear camera facing forward and slightly down
+• A compatible hub with two motors on ports A and B
+• A mount that holds the phone on the car, rear camera facing forward and slightly down
 • Android 8.0 or newer with Bluetooth Low Energy
 
 PRIVACY
 The app has no internet access. Camera frames are analysed only in the phone's memory and are never saved or sent anywhere.
 
-LEGO® is a trademark of the LEGO Group, which does not sponsor, authorize or endorse this app. BrickPilot is an independent app.
+LEGO®, Powered Up, BOOST, SPIKE™ and MINDSTORMS® are trademarks of the LEGO Group, which does not sponsor, authorize or endorse this app. BrickPilot is an independent app.
 
 ---
 
