@@ -9,11 +9,14 @@ import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.provider.Settings
 import android.util.Log
 import android.util.Size
 import android.view.MotionEvent
+import android.view.View
 import android.view.WindowManager
 import android.widget.SeekBar
 import androidx.activity.result.contract.ActivityResultContracts
@@ -51,6 +54,12 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     enum class DriveMode { AVOID, LINE, FOLLOW }
 
     @Volatile private var driveMode = DriveMode.AVOID
+    @Volatile private var vehicleType = Drivetrain.VehicleType.DIFFERENTIAL
+    // Tipul 2 pornește doar după ce direcția e calibrată
+    @Volatile private var steeringRange: SteeringRange? = null
+    private var steerText = ""
+    private val uiHandler = Handler(Looper.getMainLooper())
+    private val calibrator = SteeringCalibrator(CalibrationOutput())
     private val cameraExecutor: ExecutorService = Executors.newSingleThreadExecutor()
 
     private val autonomous = AtomicBoolean(false)
@@ -65,7 +74,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     private var analysisUseCase: ImageAnalysis? = null
     private var lastStatusMs = 0L
 
-    private var hubText = "Hub: deconectat"
+    private var hubText = "Hub: disconnected"
     // Porturile pe care hubul raportează un dispozitiv conectat
     private val attachedPorts = sortedSetOf<Int>()
 
@@ -113,6 +122,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     override fun onDestroy() {
         super.onDestroy()
         autonomous.set(false)
+        uiHandler.removeCallbacksAndMessages(null)
         getSystemService(DisplayManager::class.java).unregisterDisplayListener(displayListener)
         hub.close()
         cameraExecutor.shutdown()
@@ -157,19 +167,24 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
             }
         })
 
-        // Motoarele sunt montate în oglindă: implicit A (stânga) e inversat
-        invertA = prefs.getBoolean(KEY_INV_A, true)
-        invertB = prefs.getBoolean(KEY_INV_B, false)
-        binding.chkInvA.isChecked = invertA
-        binding.chkInvB.isChecked = invertB
+        // Fiecare tip de mașină își ține propriile inversări
         binding.chkInvA.setOnCheckedChangeListener { _, on ->
             invertA = on
-            prefs.edit().putBoolean(KEY_INV_A, on).apply()
+            prefs.edit().putBoolean(invertKeyA(), on).apply()
         }
         binding.chkInvB.setOnCheckedChangeListener { _, on ->
             invertB = on
-            prefs.edit().putBoolean(KEY_INV_B, on).apply()
+            prefs.edit().putBoolean(invertKeyB(), on).apply()
         }
+        vehicleType = Drivetrain.VehicleType.entries.getOrElse(prefs.getInt(KEY_VEHICLE, 0)) {
+            Drivetrain.VehicleType.DIFFERENTIAL
+        }
+        applyVehicleType()
+        // Alegerea se cere doar la prima pornire; apoi se schimbă din butonul mic din colț
+        if (!prefs.contains(KEY_VEHICLE)) binding.vehiclePicker.visibility = View.VISIBLE
+        binding.cardType1.setOnClickListener { selectVehicle(Drivetrain.VehicleType.DIFFERENTIAL) }
+        binding.cardType2.setOnClickListener { selectVehicle(Drivetrain.VehicleType.STEERING) }
+        binding.btnVehicle.setOnClickListener { binding.vehiclePicker.visibility = View.VISIBLE }
 
         binding.btnConnect.setOnClickListener {
             if (hub.isReady) {
@@ -205,6 +220,32 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         }
     }
 
+    private fun selectVehicle(type: Drivetrain.VehicleType) {
+        vehicleType = type
+        prefs.edit().putInt(KEY_VEHICLE, type.ordinal).apply()
+        binding.vehiclePicker.visibility = View.GONE
+        applyVehicleType()
+        renderStatus()
+    }
+
+    private fun applyVehicleType() {
+        val steering = vehicleType == Drivetrain.VehicleType.STEERING
+        // La tipul 1 motoarele sunt montate în oglindă: implicit A (stânga) e inversat
+        invertA = prefs.getBoolean(invertKeyA(), !steering)
+        invertB = prefs.getBoolean(invertKeyB(), false)
+        binding.chkInvA.isChecked = invertA
+        binding.chkInvB.isChecked = invertB
+        binding.chkInvA.setText(if (steering) R.string.invert_a_steer else R.string.invert_a)
+        binding.chkInvB.setText(if (steering) R.string.invert_b_drive else R.string.invert_b)
+        binding.btnVehicle.setText(if (steering) R.string.vehicle_btn_2 else R.string.vehicle_btn_1)
+        steeringRange = null
+        steerText = ""
+    }
+
+    private fun invertKeyA() = if (vehicleType == Drivetrain.VehicleType.STEERING) KEY_INV_STEER else KEY_INV_A
+
+    private fun invertKeyB() = if (vehicleType == Drivetrain.VehicleType.STEERING) KEY_INV_DRIVE else KEY_INV_B
+
     private fun updateModeButton() {
         binding.btnMode.setText(
             when (driveMode) {
@@ -226,26 +267,30 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
                 else -> R.string.btn_connect
             }
         )
-        binding.btnStart.isEnabled = ready && !autonomous.get()
+        val steeringReady = vehicleType == Drivetrain.VehicleType.DIFFERENTIAL || steeringRange != null
+        binding.btnStart.isEnabled = ready && steeringReady && !autonomous.get()
         binding.btnStop.isEnabled = ready
+        // Tipul se schimbă doar deconectat, altfel calibrarea și inversările n-ar mai corespunde
+        binding.btnVehicle.isEnabled = !ready && !busy
     }
 
     private fun renderStatus() {
         val f = lastFree
-        val ports = if (attachedPorts.isEmpty()) "" else " | motoare " + attachedPorts.joinToString(" ") { HubController.portName(it) }
+        val ports = (if (attachedPorts.isEmpty()) "" else " | motors " + attachedPorts.joinToString(" ") { HubController.portName(it) }) +
+            (if (steerText.isEmpty()) "" else " | $steerText")
         if (driveMode == DriveMode.LINE) {
             val mode = if (autonomous.get()) "AUTO ${lineFollower.mode}" else "manual"
             val pos = lastLinePos
-            val line = if (pos.isNaN()) "linie lipsă" else String.format(Locale.US, "linie la %+.2f", pos)
+            val line = if (pos.isNaN()) "no line" else String.format(Locale.US, "line at %+.2f", pos)
             binding.status.text = String.format(Locale.US, "%s%s\n%s | %s", hubText, ports, line, mode)
             return
         }
         if (driveMode == DriveMode.FOLLOW) {
             val mode = if (autonomous.get()) "AUTO ${objectFollower.mode}" else "manual"
             val target = if (lastTargetFound) {
-                String.format(Locale.US, "țintă la %+.2f, distanță %.2f", objectFollower.bearing, objectFollower.distance)
+                String.format(Locale.US, "target at %+.2f, distance %.2f", objectFollower.bearing, objectFollower.distance)
             } else {
-                "nicio țintă"
+                "no target"
             }
             binding.status.text = String.format(Locale.US, "%s%s\n%s | %s", hubText, ports, target, mode)
             return
@@ -270,6 +315,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
 
     private fun startAutonomous() {
         if (!hub.isReady) return
+        if (vehicleType == Drivetrain.VehicleType.STEERING && steeringRange == null) return
         avoider.reset()
         lineFollower.reset()
         lineDetector.reset()
@@ -285,6 +331,8 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         // Mai întâi oprim bucla, apoi frâna golește coada BLE
         autonomous.set(false)
         hub.emergencyBrake()
+        // STOP oprește și calibrarea; se poate relua din dialogul care apare
+        calibrator.cancel()
         if (hub.isReady) hub.setLed(HubController.LED_GREEN)
         updateButtons()
         renderStatus()
@@ -322,8 +370,14 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     }
 
     private fun sendDrive(d: Avoider.Drive) {
-        val p = Drivetrain.toPorts(d, invertA, invertB)
-        hub.setMotors(speedA = p.a, speedB = p.b)
+        if (vehicleType == Drivetrain.VehicleType.STEERING) {
+            val range = steeringRange ?: return
+            val p = Drivetrain.toSteerPorts(d, range, invertA, invertB)
+            hub.setSteerAndDrive(steerPosition = p.steerPosition, speedB = p.speedB)
+        } else {
+            val p = Drivetrain.toPorts(d, invertA, invertB)
+            hub.setMotors(speedA = p.a, speedB = p.b)
+        }
     }
 
     private fun throttledStatus() {
@@ -361,12 +415,69 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         hubText = "Hub: $message"
         if (state != HubController.State.READY) {
             autonomous.set(false)
+            stopCalibration()
             if (state == HubController.State.DISCONNECTED) {
                 attachedPorts.clear()
             }
+        } else if (vehicleType == Drivetrain.VehicleType.STEERING) {
+            startCalibration()
         }
         updateButtons()
         renderStatus()
+    }
+
+    // ---------------- Calibrarea direcției (tipul 2) ----------------
+
+    private fun startCalibration() {
+        steeringRange = null
+        steerText = "steering: calibrating..."
+        calibrator.start(SystemClock.uptimeMillis())
+        uiHandler.removeCallbacks(calibrationTick)
+        uiHandler.postDelayed(calibrationTick, CALIBRATION_TICK_MS)
+        updateButtons()
+        renderStatus()
+    }
+
+    /** La deconectare: nu mai avem ce calibra și nici calibrare valabilă. */
+    private fun stopCalibration() {
+        uiHandler.removeCallbacks(calibrationTick)
+        steeringRange = null
+        steerText = ""
+    }
+
+    private val calibrationTick = object : Runnable {
+        override fun run() {
+            calibrator.tick(SystemClock.uptimeMillis())
+            if (calibrator.isRunning) uiHandler.postDelayed(this, CALIBRATION_TICK_MS)
+        }
+    }
+
+    private inner class CalibrationOutput : SteeringCalibrator.Output {
+        override fun runSteer(speed: Int, maxPower: Int) = hub.runLimited(HubController.PORT_A, speed, maxPower)
+        override fun brakeSteer() = hub.brakePort(HubController.PORT_A)
+        override fun requestSteerPosition() = hub.requestPosition(HubController.PORT_A)
+        override fun centerSteer(position: Int) = hub.moveTo(HubController.PORT_A, position)
+
+        override fun onCalibrated(range: SteeringRange) {
+            steeringRange = range
+            steerText = "steering ±${range.half}°"
+            updateButtons()
+            renderStatus()
+        }
+
+        override fun onFailed(message: String) {
+            uiHandler.removeCallbacks(calibrationTick)
+            steerText = "steering not calibrated"
+            updateButtons()
+            renderStatus()
+            if (!hub.isReady || isFinishing) return
+            AlertDialog.Builder(this@MainActivity)
+                .setTitle(R.string.calib_failed_title)
+                .setMessage(message)
+                .setPositiveButton(R.string.calib_retry) { _, _ -> if (hub.isReady) startCalibration() }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+        }
     }
 
     override fun onPortAttached(port: Int, typeId: Int, attached: Boolean) {
@@ -375,8 +486,10 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         renderStatus()
     }
 
-    // Pozițiile encoderelor nu sunt folosite în decizii și nu se afișează
-    override fun onEncoder(port: Int, degrees: Int) = Unit
+    // Doar calibrarea direcției folosește encoderul, iar acolo doar motorul A
+    override fun onEncoder(port: Int, degrees: Int) {
+        if (port == HubController.PORT_A && calibrator.isRunning) calibrator.onPosition(degrees, SystemClock.uptimeMillis())
+    }
 
     // ---------------- Cameră ----------------
 
@@ -498,6 +611,10 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         // Chei noi: setările vechi presupuneau A = dreapta și nu mai sunt valabile
         private const val KEY_INV_A = "inv_a_left"
         private const val KEY_INV_B = "inv_b_right"
+        private const val KEY_INV_STEER = "inv_a_steer"
+        private const val KEY_INV_DRIVE = "inv_b_drive"
+        private const val KEY_VEHICLE = "vehicle_type"
         private const val STATUS_INTERVAL_MS = 150L
+        private const val CALIBRATION_TICK_MS = 50L
     }
 }

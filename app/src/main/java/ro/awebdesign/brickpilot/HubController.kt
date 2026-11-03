@@ -62,6 +62,8 @@ class HubController(context: Context, private val listener: Listener) {
     private var armed = false
     private var motorsActive = false
     private var lastCommandMs = 0L
+    // Ultima poziție trimisă motorului de direcție, ca să nu o retrimitem la fiecare cadru
+    private var lastSteer: Int? = null
 
     val isReady get() = state == State.READY
     val isBluetoothEnabled get() = adapter?.isEnabled == true
@@ -73,13 +75,13 @@ class HubController(context: Context, private val listener: Listener) {
             if (state == State.SCANNING || state == State.CONNECTING || state == State.READY) return@post
             val scanner = adapter?.bluetoothLeScanner
             if (scanner == null || !adapter.isEnabled) {
-                setState(State.FAILED, "Bluetooth indisponibil sau oprit")
+                setState(State.FAILED, "Bluetooth unavailable or turned off")
                 return@post
             }
             val filter = ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE_UUID)).build()
             val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
             scanning = true
-            setState(State.SCANNING, "Caut hubul...")
+            setState(State.SCANNING, "Searching for the hub...")
             scanner.startScan(listOf(filter), settings, scanCallback)
             ble.postDelayed(scanTimeout, SCAN_TIMEOUT_MS)
         }
@@ -100,10 +102,37 @@ class HubController(context: Context, private val listener: Listener) {
         enqueue(startSpeed(PORT_B, speedB), PORT_B)
     }
 
+    /** Tipul 2: poziția absolută a motorului de direcție (A) și viteza tracțiunii (B). */
+    fun setSteerAndDrive(steerPosition: Int, speedB: Int) = synchronized(lock) {
+        if (!armed || state != State.READY) return@synchronized
+        lastCommandMs = SystemClock.uptimeMillis()
+        motorsActive = speedB != 0
+        if (steerPosition != lastSteer) {
+            lastSteer = steerPosition
+            enqueue(gotoPosition(PORT_A, steerPosition, STEER_SPEED, STEER_POWER), PORT_A)
+        }
+        enqueue(startSpeed(PORT_B, speedB), PORT_B)
+    }
+
+    // Comenzile de calibrare merg și când modul autonom e oprit
+
+    fun runLimited(port: Int, speed: Int, maxPower: Int) = enqueue(startSpeed(port, speed, maxPower), port)
+
+    fun moveTo(port: Int, position: Int) {
+        synchronized(lock) { lastSteer = null }
+        enqueue(gotoPosition(port, position, STEER_SPEED, STEER_POWER), port)
+    }
+
+    fun brakePort(port: Int) = enqueue(brake(port), port)
+
+    /** Cere poziția curentă; răspunsul vine prin onEncoder. */
+    fun requestPosition(port: Int) = enqueue(portValueRequest(port), -1)
+
     /** Frână activă imediat: golește coada și pune frâna prima. */
     fun emergencyBrake() = synchronized(lock) {
         armed = false
         motorsActive = false
+        lastSteer = null
         lastCommandMs = SystemClock.uptimeMillis()
         ble.post {
             queue.clear()
@@ -124,7 +153,7 @@ class HubController(context: Context, private val listener: Listener) {
             val g = gatt ?: return@postDelayed
             g.disconnect()
             // Rezervă dacă nu vine callback-ul de deconectare
-            ble.postDelayed({ if (gatt === g) onDisconnected(g, "Deconectat") }, 1000)
+            ble.postDelayed({ if (gatt === g) onDisconnected(g, "Disconnected") }, 1000)
         }, 150)
     }
 
@@ -147,7 +176,7 @@ class HubController(context: Context, private val listener: Listener) {
     private val scanTimeout = Runnable {
         if (scanning) {
             stopScan()
-            setState(State.FAILED, "Hubul nu a fost găsit. Ține butonul verde până clipește alb.")
+            setState(State.FAILED, "Hub not found. Hold the green button until it blinks white.")
         }
     }
 
@@ -164,7 +193,7 @@ class HubController(context: Context, private val listener: Listener) {
             ble.post {
                 scanning = false
                 ble.removeCallbacks(scanTimeout)
-                setState(State.FAILED, "Scanare eșuată (cod $errorCode)")
+                setState(State.FAILED, "Scan failed (code $errorCode)")
             }
         }
     }
@@ -177,7 +206,7 @@ class HubController(context: Context, private val listener: Listener) {
     }
 
     private fun connectDevice(device: BluetoothDevice) {
-        setState(State.CONNECTING, "Mă conectez la ${device.address}")
+        setState(State.CONNECTING, "Connecting to ${device.address}")
         gatt = device.connectGatt(appContext, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
     }
 
@@ -189,7 +218,7 @@ class HubController(context: Context, private val listener: Listener) {
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
                     if (!g.requestMtu(MTU)) g.discoverServices()
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    if (gatt === g) onDisconnected(g, "Hub deconectat (status $status)") else g.close()
+                    if (gatt === g) onDisconnected(g, "Hub disconnected (status $status)") else g.close()
                 }
             }
         }
@@ -202,7 +231,7 @@ class HubController(context: Context, private val listener: Listener) {
             ble.post {
                 val ch = g.getService(SERVICE_UUID)?.getCharacteristic(CHAR_UUID)
                 if (ch == null) {
-                    setState(State.FAILED, "Serviciul LWP lipsește")
+                    setState(State.FAILED, "LWP service missing")
                     g.disconnect()
                     return@post
                 }
@@ -253,7 +282,7 @@ class HubController(context: Context, private val listener: Listener) {
     }
 
     private fun onDisconnected(g: BluetoothGatt, message: String) {
-        synchronized(lock) { armed = false; motorsActive = false }
+        synchronized(lock) { armed = false; motorsActive = false; lastSteer = null }
         g.close()
         gatt = null
         characteristic = null
@@ -266,7 +295,7 @@ class HubController(context: Context, private val listener: Listener) {
 
     private fun onReady() {
         if (state == State.READY) return
-        setState(State.READY, "Conectat")
+        setState(State.READY, "Connected")
         enqueue(subscribePosition(PORT_A), -1)
         enqueue(subscribePosition(PORT_B), -1)
         enqueue(brake(PORT_A), PORT_A)
@@ -335,7 +364,7 @@ class HubController(context: Context, private val listener: Listener) {
             if (state != State.READY) return
             val stale = synchronized(lock) {
                 val s = motorsActive && SystemClock.uptimeMillis() - lastCommandMs > WATCHDOG_MS
-                if (s) motorsActive = false
+                if (s) { motorsActive = false; lastSteer = null }
                 s
             }
             if (stale) {
@@ -411,11 +440,25 @@ class HubController(context: Context, private val listener: Listener) {
         private const val WATCHDOG_TICK_MS = 50L
         private const val MAX_POWER = 100
         private const val BRAKE = 127
+        private const val HOLD = 126
+        // Direcția se mișcă repede, dar fără toată puterea, ca să nu forțeze mecanismul
+        private const val STEER_SPEED = 70
+        private const val STEER_POWER = 70
 
-        fun startSpeed(port: Int, speed: Int): ByteArray = byteArrayOf(
+        fun startSpeed(port: Int, speed: Int, maxPower: Int = MAX_POWER): ByteArray = byteArrayOf(
             0x09, 0x00, 0x81.toByte(), port.toByte(), 0x11, 0x07,
-            speed.coerceIn(-100, 100).toByte(), MAX_POWER.toByte(), 0x00
+            speed.coerceIn(-100, 100).toByte(), maxPower.coerceIn(0, 100).toByte(), 0x00
         )
+
+        /** GotoAbsolutePosition: merge la poziția dată (în sistemul encoderului) și o ține. */
+        fun gotoPosition(port: Int, position: Int, speed: Int, maxPower: Int): ByteArray = byteArrayOf(
+            0x0E, 0x00, 0x81.toByte(), port.toByte(), 0x11, 0x0D,
+            position.toByte(), (position shr 8).toByte(), (position shr 16).toByte(), (position shr 24).toByte(),
+            speed.coerceIn(0, 100).toByte(), maxPower.coerceIn(0, 100).toByte(), HOLD.toByte(), 0x00
+        )
+
+        /** Port Information Request pentru valoarea curentă a portului. */
+        fun portValueRequest(port: Int): ByteArray = byteArrayOf(0x05, 0x00, 0x21, port.toByte(), 0x00)
 
         fun brake(port: Int): ByteArray = byteArrayOf(
             0x08, 0x00, 0x81.toByte(), port.toByte(), 0x11, 0x51, 0x00, BRAKE.toByte()

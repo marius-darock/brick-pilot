@@ -14,6 +14,8 @@ două motoare 88008 conectate la un Technic Hub 88012.
 | `LineDetector.kt` | Viziune pentru modul linie: poziția liniei negre pe 5 benzi |
 | `LineFollower.kt` | Decizie pentru modul linie: regulator PD, căutare când linia se pierde |
 | `ObjectFollower.kt` | Decizie pentru modul urmărire: virează spre cel mai apropiat obiect, păstrează distanța |
+| `Drivetrain.kt` | Comanda de mers pe porturi: diferențial (tip 1) sau direcție + tracțiune (tip 2) |
+| `SteeringCalibrator.kt` | Tipul 2: găsește capetele virajului și centrul direcției |
 | `GridOverlayView.kt` | Desenul grilei peste preview |
 | `MainActivity.kt` | Legătura dintre toate, UI, permisiuni, cameră |
 
@@ -46,16 +48,29 @@ Teste: `./gradlew testDebugUnitTest`.
 2. Telefonul în suport, landscape, camera spate înainte, înclinată ~30 de grade în jos.
 3. Pornește aplicația și acceptă permisiunile (cameră, Bluetooth).
 4. Apasă **CONNECT**, apoi ține apăsat butonul verde de pe hub până clipește alb.
-   La conectare butonul devine **DECONECTEAZĂ**, LED-ul hubului se face verde, iar sus apar porturile cu motor.
+   La conectare butonul devine **DISCONNECT**, LED-ul hubului se face verde, iar sus apar porturile cu motor.
    Apăsat din nou, frânează motoarele și închide conexiunea.
 5. Pune robotul pe podea liberă și verifică grila: în fața roților celulele trebuie să fie verzi,
    obstacolele roșii. Chenarul galben e podeaua de referință și trebuie să cadă pe podea curată.
 6. Apasă **START** (LED albastru). **STOP** frânează imediat și iese din modul autonom.
 
+## Tipul mașinii
+
+La prima pornire aplicația cere tipul mașinii și îl ține minte. Se schimbă din butonul mic **TYPE** din colțul stânga-jos, doar deconectat:
+
+- **Tip 1, diferențial**: A = roata spate stângă, B = roata spate dreaptă; virează prin diferența de viteză.
+- **Tip 2, direcție**: A = motorul de direcție din față, B = motorul de tracțiune.
+  După **CONNECT**, motorul A merge încet, cu putere mică, până în capătul din stânga, apoi în cel din dreapta,
+  și se oprește la mijloc. Cursa folosită rămâne cu ~15% înaintea capetelor, ca mecanismul să nu forțeze.
+  **START** devine activ doar după calibrare; dacă eșuează, apare un dialog cu **Retry**.
+  Direcția are nevoie de opritori fizici stânga-dreapta; fără ei calibrarea expiră după 4 secunde.
+  Mașina nu se poate roti pe loc, așa că rotirea din modurile autonome devine mers înapoi cu roțile bracate invers.
+  Dacă virează în partea greșită, bifează **Inv. A steering**; dacă merge înapoi, **Inv. B drive**.
+
 ## Modul linie (urmărește o linie neagră)
 
-Butonul mov de sub CONNECT trece prin cele trei moduri: **MOD: OBSTACOLE**, **MOD: LINIE**,
-**MOD: URMĂRIRE**. Modul se salvează.
+Butonul mov de sub CONNECT trece prin cele trei moduri: **MODE: OBSTACLES**, **MODE: LINE**,
+**MODE: FOLLOW**. Modul se salvează.
 Schimbarea modului în timpul mersului oprește robotul.
 
 - Linia: bandă izolieră neagră sau bandă adezivă neagră, 1,5..3 cm lățime, pe podea deschisă la culoare.
@@ -96,7 +111,7 @@ Porturile sunt fixe în cod: **A = motorul stâng**, **B = motorul drept** (priv
 se uită camera). Dacă ai cablurile invers, schimbă-le fizic între porturi.
 
 Sus dreapta sunt două bife, salvate automat pe fiecare telefon:
-- **Inv. A stânga** (implicit bifată) și **Inv. B dreapta** (implicit nebifată): sensul fiecărui motor.
+- **Inv. A left** (implicit bifată) și **Inv. B right** (implicit nebifată): sensul fiecărui motor.
   Motoarele sunt montate în oglindă, deci exact una trebuie bifată.
 - se rotește pe loc la START pe drum liber: sunt bifate ambele sau niciuna; lasă una bifată;
 - merge înapoi: mută bifa pe celălalt motor.
@@ -128,7 +143,7 @@ să fie podeaua imediat din fața roților.
 - Dacă în grilă apar pereții îndepărtați sau mobila, înclină camera mai mult în jos.
 - Dacă rândul de jos arată bara de protecție a robotului, înclină camera mai puțin sau mut-o mai în față.
 
-**Viteza.** Sliderul „Viteză” (jos dreapta, 40..200%) scalează toate mișcările în toate modurile:
+**Viteza.** Sliderul „Speed” (jos dreapta, 40..200%) scalează toate mișcările în toate modurile:
 mers, viraje, mers înapoi și rotire. Se salvează automat.
 
 **Ce face în fața unui obstacol (modul OBSTACOLE).**
