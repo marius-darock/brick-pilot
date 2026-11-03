@@ -107,17 +107,19 @@ class SteeringCalibrator(private val out: Output) {
     }
 
     companion object {
-        const val CAL_SPEED = 25
-        // Puterea mică limitează forța cu care motorul apasă în capete
-        const val CAL_POWER = 40
+        const val CAL_SPEED = 30
+        // Destulă putere ca un mecanism greu să nu se oprească din frecare înainte de capăt,
+        // dar nu toată, ca motorul să nu forțeze în opritori
+        const val CAL_POWER = 75
         const val START_GRACE_MS = 300L
-        const val STALL_MS = 250L
-        const val END_TIMEOUT_MS = 4000L
+        // Un mecanism greu se mișcă încet; doar o pauză mai lungă înseamnă capăt
+        const val STALL_MS = 400L
+        const val END_TIMEOUT_MS = 6000L
         const val POSITION_TIMEOUT_MS = 1500L
         const val MIN_TRAVEL = 20
         // Folosim doar o parte din jumătatea cursei, dar rămânem cel puțin câteva grade departe de capete
-        const val USABLE = 0.85f
-        const val END_MARGIN = 5
+        const val USABLE = 0.92f
+        const val END_MARGIN = 4
 
         fun rangeFromEnds(a: Int, b: Int): SteeringRange? {
             val travel = abs(b - a)

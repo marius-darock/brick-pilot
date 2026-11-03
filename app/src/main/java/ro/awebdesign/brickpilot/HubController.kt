@@ -125,6 +125,9 @@ class HubController(context: Context, private val listener: Listener) {
 
     fun brakePort(port: Int) = enqueue(brake(port), port)
 
+    /** Encoder mai fin pentru motorul de direcție, ca o mișcare lentă să nu pară blocare. */
+    fun subscribeFine(port: Int) = enqueue(subscribePosition(port, FINE_DELTA), -1)
+
     /** Cere poziția curentă; răspunsul vine prin onEncoder. */
     fun requestPosition(port: Int) = enqueue(portValueRequest(port), -1)
 
@@ -441,9 +444,10 @@ class HubController(context: Context, private val listener: Listener) {
         private const val MAX_POWER = 100
         private const val BRAKE = 127
         private const val HOLD = 126
-        // Direcția se mișcă repede, dar fără toată puterea, ca să nu forțeze mecanismul
-        private const val STEER_SPEED = 70
-        private const val STEER_POWER = 70
+        private const val FINE_DELTA = 2
+        // Toată puterea: roțile apăsate pe podea fac direcția grea; cursa e oricum limitată de calibrare
+        private const val STEER_SPEED = 100
+        private const val STEER_POWER = 100
 
         fun startSpeed(port: Int, speed: Int, maxPower: Int = MAX_POWER): ByteArray = byteArrayOf(
             0x09, 0x00, 0x81.toByte(), port.toByte(), 0x11, 0x07,

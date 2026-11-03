@@ -34,6 +34,15 @@ class SteeringTest {
     }
 
     @Test
+    fun higherGainSteersHarderUpToFullLock() {
+        val d = Avoider.Drive(45, 15)
+        val soft = Drivetrain.toSteering(d, gain = 1f).steer
+        val hard = Drivetrain.toSteering(d, gain = 2.5f).steer
+        assertTrue(hard > soft)
+        assertEquals(1f, Drivetrain.toSteering(d, gain = 4f).steer, 0.001f)
+    }
+
+    @Test
     fun spinBecomesReverseWithOppositeLock() {
         // Rotire pe loc spre dreapta: înapoi cu roțile bracate la stânga, botul merge spre dreapta
         val s = Drivetrain.toSteering(Avoider.Drive(0, 60))

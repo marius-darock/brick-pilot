@@ -185,6 +185,26 @@
             android:layout_weight="1"
             android:max="200"
             android:min="40" />
+
+        <!-- Doar la tipul 2: cât de tare virează direcția pentru aceeași comandă -->
+        <TextView
+            android:id="@+id/steerLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="24dp"
+            android:maxLines="1"
+            android:minWidth="100dp"
+            android:textColor="@android:color/white"
+            android:visibility="gone" />
+
+        <SeekBar
+            android:id="@+id/steer"
+            android:layout_width="0dp"
+            android:layout_height="40dp"
+            android:layout_weight="1"
+            android:max="400"
+            android:min="100"
+            android:visibility="gone" />
     </LinearLayout>
 </LinearLayout>
 

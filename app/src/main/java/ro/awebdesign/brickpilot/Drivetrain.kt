@@ -32,18 +32,22 @@ object Drivetrain {
      * deci nu depinde de viteza aleasă. Mersul înapoi inversează direcția, ca mașina să se rotească
      * tot în sensul cerut.
      */
-    fun toSteering(d: Avoider.Drive): SteerDrive {
+    fun toSteering(d: Avoider.Drive, gain: Float = DEFAULT_STEER_GAIN): SteerDrive {
         if (d.forward == 0) {
             if (d.turn == 0) return SteerDrive(0f, 0)
             // Nu se poate roti pe loc: dă înapoi cu roțile bracate invers, ca la o întoarcere din trei mișcări
             return SteerDrive(-sign(d.turn.toFloat()), -(abs(d.turn) * SPIN_REVERSE).roundToInt())
         }
-        val steer = (d.turn.toFloat() / d.forward).coerceIn(-1f, 1f)
+        // O mașină cu direcție virează mai larg decât una diferențială la aceeași comandă; gain compensează
+        val steer = (d.turn.toFloat() / d.forward * gain).coerceIn(-1f, 1f)
         return SteerDrive(steer, d.forward.coerceIn(-100, 100))
     }
 
-    fun toSteerPorts(d: Avoider.Drive, range: SteeringRange, invertA: Boolean, invertB: Boolean): SteerPorts {
-        val s = toSteering(d)
+    fun toSteerPorts(
+        d: Avoider.Drive, range: SteeringRange, invertA: Boolean, invertB: Boolean,
+        gain: Float = DEFAULT_STEER_GAIN
+    ): SteerPorts {
+        val s = toSteering(d, gain)
         val steer = if (invertA) -s.steer else s.steer
         return SteerPorts(
             steerPosition = range.center + (steer * range.half).roundToInt(),
@@ -53,4 +57,7 @@ object Drivetrain {
 
     // Rotirea pe loc devine mers înapoi mai lent decât viteza ei
     const val SPIN_REVERSE = 0.6f
+
+    // Sliderul „Steer” din tipul 2, în procente
+    const val DEFAULT_STEER_GAIN = 1.8f
 }

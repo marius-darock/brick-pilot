@@ -39,6 +39,7 @@ import java.util.Locale
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.roundToInt
 
 class MainActivity : AppCompatActivity(), HubController.Listener {
 
@@ -57,6 +58,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     @Volatile private var vehicleType = Drivetrain.VehicleType.DIFFERENTIAL
     // Tipul 2 pornește doar după ce direcția e calibrată
     @Volatile private var steeringRange: SteeringRange? = null
+    @Volatile private var steerGain = Drivetrain.DEFAULT_STEER_GAIN
     private var steerText = ""
     private val uiHandler = Handler(Looper.getMainLooper())
     private val calibrator = SteeringCalibrator(CalibrationOutput())
@@ -167,6 +169,22 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
             }
         })
 
+        val steer = prefs.getInt(KEY_STEER_GAIN, (Drivetrain.DEFAULT_STEER_GAIN * 100).roundToInt())
+        steerGain = steer / 100f
+        binding.steer.progress = steer
+        binding.steerLabel.text = getString(R.string.steer_label, steer)
+        binding.steer.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar, value: Int, fromUser: Boolean) {
+                steerGain = value / 100f
+                binding.steerLabel.text = getString(R.string.steer_label, value)
+            }
+
+            override fun onStartTrackingTouch(sb: SeekBar) = Unit
+            override fun onStopTrackingTouch(sb: SeekBar) {
+                prefs.edit().putInt(KEY_STEER_GAIN, sb.progress).apply()
+            }
+        })
+
         // Fiecare tip de mașină își ține propriile inversări
         binding.chkInvA.setOnCheckedChangeListener { _, on ->
             invertA = on
@@ -238,6 +256,8 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         binding.chkInvA.setText(if (steering) R.string.invert_a_steer else R.string.invert_a)
         binding.chkInvB.setText(if (steering) R.string.invert_b_drive else R.string.invert_b)
         binding.btnVehicle.setText(if (steering) R.string.vehicle_btn_2 else R.string.vehicle_btn_1)
+        binding.steerLabel.visibility = if (steering) View.VISIBLE else View.GONE
+        binding.steer.visibility = if (steering) View.VISIBLE else View.GONE
         steeringRange = null
         steerText = ""
     }
@@ -372,7 +392,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     private fun sendDrive(d: Avoider.Drive) {
         if (vehicleType == Drivetrain.VehicleType.STEERING) {
             val range = steeringRange ?: return
-            val p = Drivetrain.toSteerPorts(d, range, invertA, invertB)
+            val p = Drivetrain.toSteerPorts(d, range, invertA, invertB, steerGain)
             hub.setSteerAndDrive(steerPosition = p.steerPosition, speedB = p.speedB)
         } else {
             val p = Drivetrain.toPorts(d, invertA, invertB)
@@ -431,6 +451,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     private fun startCalibration() {
         steeringRange = null
         steerText = "steering: calibrating..."
+        hub.subscribeFine(HubController.PORT_A)
         calibrator.start(SystemClock.uptimeMillis())
         uiHandler.removeCallbacks(calibrationTick)
         uiHandler.postDelayed(calibrationTick, CALIBRATION_TICK_MS)
@@ -461,6 +482,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         override fun onCalibrated(range: SteeringRange) {
             steeringRange = range
             steerText = "steering ±${range.half}°"
+            Log.i(TAG, "Steering calibrated: center ${range.center}, ±${range.half}°")
             updateButtons()
             renderStatus()
         }
@@ -614,6 +636,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         private const val KEY_INV_STEER = "inv_a_steer"
         private const val KEY_INV_DRIVE = "inv_b_drive"
         private const val KEY_VEHICLE = "vehicle_type"
+        private const val KEY_STEER_GAIN = "steer_gain"
         private const val STATUS_INTERVAL_MS = 150L
         private const val CALIBRATION_TICK_MS = 50L
     }

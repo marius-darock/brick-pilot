@@ -22,6 +22,7 @@
     <string name="calib_retry">Retry</string>
     <string name="threshold_label">Threshold: %1$d</string>
     <string name="speed_label">Speed: %1$d%%</string>
+    <string name="steer_label">Steer: %1$d%%</string>
     <string name="pairing_title">Get the hub ready</string>
     <string name="pairing_msg">Hold the green button on the hub until it blinks white.</string>
     <string name="pairing_go">Search</string>
