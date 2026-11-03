@@ -27,6 +27,16 @@ class ObjectFollower {
     /** Factor de viteză, 1.0 = valorile de bază. */
     @Volatile var speedFactor = 1f
 
+    /** Ținta recunoscută după culoare în cadrul curent, pentru desenul de pe ecran. */
+    @Volatile var tracked: TrackedTarget? = null
+        private set
+
+    /** Ținta e recunoscută după culoare, nu doar „cel mai apropiat obiect”. */
+    val locked get() = tracker.locked
+
+    // Ținta rămâne aceeași și după STOP/START; se uită singură dacă dispare mai mult timp
+    private val tracker = ObjectTracker()
+
     private var hasTarget = false
     // Câte cadre la rând lipsește ținta; un cadru ratat nu oprește urmărirea
     private var missed = 0
@@ -42,8 +52,18 @@ class ObjectFollower {
         backBlocked = false
     }
 
+    /** Uită ținta recunoscută; următorul obiect apropiat devine ținta nouă. */
+    fun forgetTarget() = tracker.reset()
+
     fun decide(r: FloorResult, nowMs: Long): Avoider.Drive {
-        val target = findTarget(r)
+        val t = tracker.track(r)
+        tracked = t
+        // Cu o țintă recunoscută ignorăm celelalte obstacole; fără ea, cel mai apropiat obiect
+        val target = when {
+            t != null -> Pair(t.bearing, t.distance)
+            tracker.locked -> null
+            else -> findTarget(r)
+        }
         if (target == null) {
             missed++
             if (missed > MAX_MISSED) {
@@ -89,6 +109,21 @@ class ObjectFollower {
         return Avoider.Drive((forward * speedFactor).roundToInt(), (turn * speedFactor).roundToInt())
     }
 
+    /**
+     * Aceeași decizie pentru mașina cu direcție (tip 2). Roțile din față arată mereu spre țintă; o mașină
+     * cu direcție nu se poate roti pe loc, deci când ținta e la distanța bună, dar într-o parte, înaintează
+     * încet ca să se întoarcă spre ea. Înapoi merge drept, ca să nu se întoarcă de la țintă.
+     */
+    fun steering(d: Avoider.Drive, steerScale: Float): Drivetrain.SteerDrive {
+        if (mode == Mode.NO_TARGET) return Drivetrain.SteerDrive(0f, 0)
+        val steer = if (abs(bearing) < BEARING_DEADBAND) 0f else (bearing * STEER_K * steerScale).coerceIn(-1f, 1f)
+        return when {
+            d.forward < 0 -> Drivetrain.SteerDrive(0f, d.forward)
+            d.forward == 0 && abs(bearing) > CREEP_BEARING -> Drivetrain.SteerDrive(steer, (CREEP * speedFactor).roundToInt())
+            else -> Drivetrain.SteerDrive(steer, d.forward)
+        }
+    }
+
     // Ținta: coloanele în care obstacolul e cel mai aproape de robot. Întoarce (direcție, distanță)
     private fun findTarget(r: FloorResult): Pair<Float, Float>? {
         val freeRows = IntArray(COLS)
@@ -128,5 +163,9 @@ class ObjectFollower {
         const val MAX_MISSED = 5
         const val MAX_BACK_MS = 1500L
         const val BACK_MAX_BEARING = 0.35f
+        // Tipul 2: cât de tare bracează spre țintă și cât de încet înaintează ca să se întoarcă spre ea
+        const val STEER_K = 1.6f
+        const val CREEP_BEARING = 0.3f
+        const val CREEP = 15f
     }
 }

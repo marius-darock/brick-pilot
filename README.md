@@ -4,7 +4,7 @@ An Android app that turns a phone into the brain of a LEGO Technic robot car.
 The phone looks at the floor through its rear camera, finds obstacles or a line, and drives the
 motors of a Technic Hub 88012 over Bluetooth LE.
 
-Current version: **1.3.0** (versionCode 4).
+Current version: **1.4.0** (versionCode 5).
 
 Two kinds of car are supported:
 
@@ -18,7 +18,9 @@ Two kinds of car are supported:
 | `HubController.kt` | BLE: scan, GATT, write queue, watchdog, LWP messages |
 | `FloorAnalyzer.kt` | Vision: 9x7 grid in YUV, floor reference, free[3] |
 | `Avoider.kt` | Decision: drive, slow down, spin in place, motor mixing |
-| `LineDetector.kt` | Vision for line mode: black line position on 5 bands |
+| `LineDetector.kt` | Vision for line mode: black line on 5 bands, linked chains, ignores stray dots |
+| `CommandHistory.kt` | Last driving commands, replayed backwards to return to the line |
+| `ObjectTracker.kt` | Follow mode: recognises the target by its colour and tracks it |
 | `LineFollower.kt` | Decision for line mode: PD controller, look-ahead at speed, search when the line is lost |
 | `ObjectFollower.kt` | Decision for follow mode: turns towards the closest object, keeps the distance |
 | `Drivetrain.kt` | Turns a drive command into port commands: differential (type 1) or steering + drive (type 2) |
@@ -153,13 +155,22 @@ The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLE
   Contrast is what matters: on dark parquet a black line is hard to see.
 - Five horizontal bands are shown on screen. The yellow dot on each band is where the line was found;
   yellow lines join them. A red frame around the image means the line is not visible.
-- The line is searched from the bottom up: on each band the dark segment next to the one on the band
-  below is chosen. A dark object elsewhere in the image is ignored, and so are parquet joints (too
-  narrow) and large shadows (too wide).
+- How the line is recognised (`LineDetector.kt`):
+  - on each band every dark segment is a candidate, but only if it is clearly darker than the floor
+    on **both** sides of it. Parquet joints (too narrow), large shadows (too wide) and the edge of a
+    shadow coming into the picture (dark on one side only) are rejected;
+  - the candidates are joined from the bottom band up into chains; a segment only joins one on the
+    band below (or the one below that) that is close enough;
+  - **the line must be seen on at least 2 linked bands.** A single dot on one band, a stain or the end
+    of a line at the side of the track is ignored and no longer shown on screen;
+  - among the chains, the longest one closest to where the line was in the previous frame wins, so a
+    second line appearing at the side does not steal the robot from the line it follows.
 - The robot turns towards the line in proportion to how far it is from the center and slows down in
   curves.
-- If the line leaves the image, it turns towards the side where it saw the line last, for at most
-  2 seconds, then stops. If it does not see the line at START, it stays put.
+- **If the line leaves the image, the robot goes back the way it came**: it replays its last
+  2.5 seconds of commands backwards (same arc, reversed), until the line is in view again. Only if it
+  still does not see it does it turn towards the side where it saw the line last, for at most
+  2 seconds, then it stops. If it does not see the line at START, it stays put.
 - The threshold slider does not matter in line mode; the speed slider does. Start with 60..80% speed.
 
 ### Line mode on a type 2 car
@@ -180,8 +191,10 @@ the swings grow until it loses the line. The new controller:
 - **remembers** what it learned: the values are saved when you press STOP and loaded on the next
   start. The status line shows `learned steer N% speed N%`. **Long-press the "Steer" label** to reset
   them to 100%.
-- when the line leaves the image, it drives slowly forward with the wheels turned towards the side
-  where it saw the line last, for at most 1.5 s, then stops.
+- when the line leaves the image, it reverses along the path it just drove, with the same wheel
+  angles, until the line is back in view (at most 2.5 s). If that is not enough, it drives slowly
+  forward with the wheels turned towards the side where it saw the line last, for at most 1.5 s,
+  then stops. The status shows `AUTO RETRACE`, `AUTO SEARCH` or `AUTO LOST`.
 
 The **Speed** and **Steer** sliders still apply. Start with Steer at 180% and let it learn; if it
 still swings, lower Steer.
@@ -281,9 +294,29 @@ long), so the spin angle and reversing distance stay the same.
 
 ## Follow mode (follows an object)
 
-Uses the same grid as obstacle mode. The target is the closest object (the lowest red cells). The
-robot turns towards it and keeps a distance of about 2 free grid rows: it drives forward when the
-object moves away and stays put when it sees nothing.
+**How the target is recognised** (`ObjectTracker.kt`). When there is no target yet, the closest
+object in the obstacle grid becomes the target and the robot remembers **its colour**. From then on
+it searches the whole picture for an area of that colour that does not look like the floor, and picks
+the one closest to where the target was a moment ago. Walls, furniture, shadows and other obstacles
+no longer steal the target, even if they are closer. The remembered colour follows slow changes of
+light. A cyan box on screen shows the recognised target, and the status says `locked target`.
+
+- The target is kept after STOP/START, so you can show the object to the robot first, check the cyan
+  box, and then press START.
+- If the target is not seen for about 20 frames (under a second), it is forgotten and the closest
+  object becomes the new target.
+- **Long-press the camera image** (while stopped, in FOLLOW mode) to forget the target and pick the
+  closest object again.
+- A target that differs from the floor only by brightness (for example grey on grey) cannot be
+  locked; the robot then follows the closest object as before (`nearest object` in the status).
+
+The robot turns towards the target and keeps a distance of about 2 free grid rows: it drives forward
+when the object moves away and stays put when it sees nothing.
+
+**On a type 2 car** the front wheels always point at the target. A steering car cannot turn in place,
+so when the target is at the right distance but off to the side, it creeps forward slowly to turn
+towards it. When it has to back off it reverses straight. The **Inv. A steer** checkbox must be set
+the same way as in the other modes; following no longer needs it inverted.
 
 It reverses only if the object in the middle of the image comes towards it, for at most 1.5 seconds
 in a row. Something close at the edge of the image (for example one of the robot's wheels) no longer

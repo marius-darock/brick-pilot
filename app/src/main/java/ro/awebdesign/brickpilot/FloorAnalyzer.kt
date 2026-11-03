@@ -15,7 +15,12 @@ class FloorResult(
     val free: FloatArray,           // stânga, centru, dreapta, 0..1
     val frameWidth: Int,            // dimensiuni după rotire, așa cum le vede utilizatorul
     val frameHeight: Int,
-    val timestampMs: Long
+    val timestampMs: Long,
+    // Imaginea întreagă la rezoluție mică (FINE_COLS x FINE_ROWS, rând major, rândul 0 sus),
+    // pentru recunoașterea țintei după culoare în modul urmărire
+    val fineY: IntArray = IntArray(0),
+    val fineU: IntArray = IntArray(0),
+    val fineV: IntArray = IntArray(0)
 )
 
 /**
@@ -134,7 +139,38 @@ class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis
             free[t] = rows / ROWS.toFloat()
         }
 
-        onResult(FloorResult(obstacle, distance, refY, refU, refV, free, upW, upH, now))
+        // Grila fină pentru urmărirea țintei: media a 2x2 pixeli în fiecare punct
+        val fy = IntArray(FINE_COLS * FINE_ROWS)
+        val fu = IntArray(FINE_COLS * FINE_ROWS)
+        val fv = IntArray(FINE_COLS * FINE_ROWS)
+        for (r in 0 until FINE_ROWS) {
+            for (c in 0 until FINE_COLS) {
+                var ty = 0
+                var tu = 0
+                var tv = 0
+                for (j in 0..1) for (i in 0..1) {
+                    val ux = ((c + 0.25f + i * 0.5f) * upW / FINE_COLS).toInt().coerceIn(0, upW - 1)
+                    val uy = ((r + 0.25f + j * 0.5f) * upH / FINE_ROWS).toInt().coerceIn(0, upH - 1)
+                    val x: Int
+                    val y: Int
+                    when (rot) {
+                        90 -> { x = uy; y = rawH - 1 - ux }
+                        180 -> { x = rawW - 1 - ux; y = rawH - 1 - uy }
+                        270 -> { x = rawW - 1 - uy; y = ux }
+                        else -> { x = ux; y = uy }
+                    }
+                    ty += yBuf.get(y * yRow + x * yPix).toInt() and 0xFF
+                    tu += uBuf.get((y shr 1) * uRow + (x shr 1) * uPix).toInt() and 0xFF
+                    tv += vBuf.get((y shr 1) * vRow + (x shr 1) * vPix).toInt() and 0xFF
+                }
+                val k = r * FINE_COLS + c
+                fy[k] = ty / 4
+                fu[k] = tu / 4
+                fv[k] = tv / 4
+            }
+        }
+
+        onResult(FloorResult(obstacle, distance, refY, refU, refV, free, upW, upH, now, fy, fu, fv))
     }
 
     private fun median(a: IntArray): Float {
@@ -166,6 +202,8 @@ class FloorAnalyzer(private val onResult: (FloorResult) -> Unit) : ImageAnalysis
         const val DEFAULT_THRESHOLD = 14f
         // Cât de departe de referință poate ajunge podeaua prin treceri treptate, în multipli de prag
         const val GLOBAL_FACTOR = 3.5f
+        const val FINE_COLS = 40
+        const val FINE_ROWS = 30
         private const val TAG = "BrickPilot"
 
         // Chroma cântărește mai mult, e stabilă la umbre

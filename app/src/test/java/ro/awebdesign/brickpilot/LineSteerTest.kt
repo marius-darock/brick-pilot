@@ -98,13 +98,32 @@ class LineSteerTest {
     }
 
     @Test
-    fun searchesTowardsTheLastSide() {
+    fun retracesThenSearchesTowardsTheLastSide() {
         val c = LineSteerController()
-        c.decide(LineResult(FloatArray(5) { 0.6f }, 640, 480, 0), 1000)
-        val lost = c.decide(LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0), 1100)
-        assertTrue(lost.steer > 0 && lost.speed > 0)
-        val gone = c.decide(LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0), 5000)
+        val none = LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0)
+        var t = 1000L
+        // Merge pe o curbă la dreapta, apoi pierde linia
+        repeat(30) { c.decide(LineResult(FloatArray(5) { 0.6f }, 640, 480, 0), t); t += 33 }
+        val back = c.decide(none, t)
+        assertTrue("dă înapoi pe drumul parcurs", c.mode == LineSteerController.Mode.RETRACE && back.speed < 0)
+        assertTrue("cu același unghi", back.steer > 0)
+        // După ce istoricul se termină, caută înainte spre partea liniei
+        t += LineSteerController.RETRACE_MS + 100
+        c.decide(none, t)
+        val search = c.decide(none, t + 50)
+        assertTrue(c.mode == LineSteerController.Mode.SEARCH && search.steer > 0 && search.speed > 0)
+        val gone = c.decide(none, t + 5000)
         assertTrue(gone.speed == 0)
+    }
+
+    @Test
+    fun retraceStopsWhenTheLineIsBack() {
+        val c = LineSteerController()
+        var t = 1000L
+        repeat(30) { c.decide(LineResult(FloatArray(5) { 0.3f }, 640, 480, 0), t); t += 33 }
+        c.decide(LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0), t)
+        val again = c.decide(LineResult(FloatArray(5) { 0.2f }, 640, 480, 0), t + 300)
+        assertTrue(c.mode == LineSteerController.Mode.FOLLOW && again.speed > 0)
     }
 
     companion object {

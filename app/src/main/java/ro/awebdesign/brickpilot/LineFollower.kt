@@ -1,13 +1,14 @@
 package ro.awebdesign.brickpilot
 
 import kotlin.math.abs
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 
 /** Decizia pentru urmărirea liniei: regulator PD pe poziția netezită a liniei, plus căutare când se pierde. */
 class LineFollower {
 
-    enum class Mode { FOLLOW, SEARCH, LOST }
+    enum class Mode { FOLLOW, RETRACE, SEARCH, LOST }
 
     @Volatile var mode = Mode.FOLLOW
         private set
@@ -21,6 +22,9 @@ class LineFollower {
     private var lastSeenMs = 0L
     // +1 = dreapta, -1 = stânga; partea în care a fost linia ultima dată
     private var lastSide = 0
+    // Drumul parcurs, ca să se poată întoarce acolo unde a văzut linia ultima dată
+    private val history = CommandHistory(RETRACE_MS)
+    private var searchStartMs = 0L
 
     fun reset() {
         mode = Mode.FOLLOW
@@ -29,6 +33,8 @@ class LineFollower {
         lastMs = 0L
         lastSeenMs = 0L
         lastSide = 0
+        history.clear()
+        searchStartMs = 0L
     }
 
     fun decide(r: LineResult, nowMs: Long): Avoider.Drive {
@@ -38,14 +44,29 @@ class LineFollower {
         if (raw.isNaN()) {
             lastMs = 0L
             filtered = Float.NaN
-            // Linia a ieșit din imagine: ne rotim spre partea unde a fost ultima dată
-            if (lastSide != 0 && lastSeenMs > 0 && nowMs - lastSeenMs < SEARCH_MS) {
+            // Linia a ieșit din imagine: întâi refacem înapoi drumul parcurs, până o vedem din nou
+            if (mode == Mode.FOLLOW && lastSeenMs > 0) {
+                mode = if (history.startReplay(nowMs)) Mode.RETRACE else Mode.SEARCH
+                searchStartMs = nowMs
+            }
+            if (mode == Mode.RETRACE) {
+                val c = history.replay(nowMs)
+                if (c != null) {
+                    // Vitezele roților inversate refac același arc înapoi; le plafonăm păstrând raportul
+                    val scale = min(1f, RETRACE_SPEED * speedFactor / max(1f, abs(c.first) + abs(c.second)))
+                    return Avoider.Drive(-(c.first * scale).roundToInt(), -(c.second * scale).roundToInt())
+                }
                 mode = Mode.SEARCH
+                searchStartMs = nowMs
+            }
+            // Apoi ne rotim spre partea unde a fost ultima dată
+            if (mode == Mode.SEARCH && lastSide != 0 && nowMs - searchStartMs < SEARCH_MS) {
                 return drive(0, SEARCH_TURN * lastSide)
             }
             mode = Mode.LOST
             return drive(0, 0)
         }
+        if (mode != Mode.FOLLOW) history.stopReplay()
 
         // Netezire, ca un cadru zgomotos să nu dea o smucitură
         val err = if (filtered.isNaN()) raw else filtered + SMOOTHING * (raw - filtered)
@@ -62,7 +83,9 @@ class LineFollower {
         val turn = (KP * err + KD * dErr).roundToInt().coerceIn(-MAX_TURN, MAX_TURN)
         // În curbe strânse încetinim, ca linia să nu iasă din imagine
         val forward = (BASE_FORWARD * (1f - SLOWDOWN * min(1f, abs(err)))).roundToInt()
-        return drive(forward, turn)
+        val d = drive(forward, turn)
+        history.record(nowMs, d.forward.toFloat(), d.turn.toFloat())
+        return d
     }
 
     private fun drive(forward: Int, turn: Int) =
@@ -86,6 +109,8 @@ class LineFollower {
         const val SIDE_DEADBAND = 0.1f
         const val SEARCH_TURN = 35
         const val SEARCH_MS = 2000L
+        const val RETRACE_MS = 2500L
+        const val RETRACE_SPEED = 35f
 
         /** Poziția ponderată a liniei, NaN dacă nu e pe nicio bandă. */
         fun position(r: LineResult, lookahead: Float = 0f): Float {

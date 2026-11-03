@@ -52,7 +52,9 @@ class DirectionTest {
     fun lostLineSearchesTowardLastSide() {
         val f = LineFollower()
         f.decide(LineResult(FloatArray(5) { 0.6f }, 640, 480, 0), 1000)
-        val d = f.decide(LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0), 1100)
+        // Întâi refacem drumul înapoi; după ce istoricul se termină, caută prin rotire
+        f.decide(LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0), 1100)
+        val d = f.decide(LineResult(FloatArray(5) { Float.NaN }, 640, 480, 0), 1100 + LineFollower.RETRACE_MS + 100)
         assertEquals(LineFollower.Mode.SEARCH, f.mode)
         val (l, r) = wheels(d)
         assertTrue("caută spre dreapta, unde a fost linia", l > 0 && r < 0)

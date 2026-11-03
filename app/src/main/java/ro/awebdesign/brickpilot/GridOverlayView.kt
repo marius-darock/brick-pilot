@@ -23,6 +23,9 @@ class GridOverlayView @JvmOverloads constructor(
     @Volatile private var result: FloorResult? = null
     @Volatile private var line: LineResult? = null
 
+    /** Ținta recunoscută în modul urmărire, desenată cu un chenar. */
+    @Volatile var target: TrackedTarget? = null
+
     private val obstaclePaint = Paint().apply { color = Color.argb(110, 255, 0, 0) }
     private val freePaint = Paint().apply { color = Color.argb(35, 0, 255, 0) }
     private val linePaint = Paint().apply {
@@ -36,6 +39,11 @@ class GridOverlayView @JvmOverloads constructor(
         style = Paint.Style.STROKE
     }
     private val barPaint = Paint().apply { color = Color.argb(200, 0, 200, 255) }
+    private val targetPaint = Paint().apply {
+        color = Color.CYAN
+        strokeWidth = 6f
+        style = Paint.Style.STROKE
+    }
     private val pointPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.YELLOW }
     private val pathPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = Color.YELLOW
@@ -117,6 +125,14 @@ class GridOverlayView @JvmOverloads constructor(
             val cx = content.left + thirdW * (t + 0.5f)
             val h = (content.bottom - top) * r.free[t]
             canvas.drawRect(cx - 6f, content.bottom - h, cx + 6f, content.bottom, barPaint)
+        }
+
+        target?.let {
+            cell.set(
+                content.left + it.left * content.width(), content.top + it.top * content.height(),
+                content.left + it.right * content.width(), content.top + it.bottom * content.height()
+            )
+            canvas.drawRect(cell, targetPaint)
         }
     }
 

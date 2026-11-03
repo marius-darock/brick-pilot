@@ -314,6 +314,13 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
                 false
             }
         }
+        // Oprit, în modul urmărire: apăsare lungă pe imagine = alege din nou ținta
+        binding.overlay.setOnLongClickListener {
+            if (autonomous.get() || driveMode != DriveMode.FOLLOW) return@setOnLongClickListener false
+            objectFollower.forgetTarget()
+            Toast.makeText(this, R.string.target_reset, Toast.LENGTH_SHORT).show()
+            true
+        }
 
         driveMode = DriveMode.entries.getOrElse(prefs.getInt(KEY_DRIVE_MODE, 0)) { DriveMode.AVOID }
         updateModeButton()
@@ -411,7 +418,11 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         if (driveMode == DriveMode.FOLLOW) {
             val mode = if (autonomous.get()) "AUTO ${objectFollower.mode}" else "manual"
             val target = if (lastTargetFound) {
-                String.format(Locale.US, "target at %+.2f, distance %.2f", objectFollower.bearing, objectFollower.distance)
+                String.format(
+                    Locale.US, "%s at %+.2f, distance %.2f",
+                    if (objectFollower.locked) "locked target" else "nearest object",
+                    objectFollower.bearing, objectFollower.distance
+                )
             } else {
                 "no target"
             }
@@ -474,9 +485,15 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         val now = SystemClock.uptimeMillis()
         val followDrive = if (following) objectFollower.decide(r, now) else null
         if (following) lastTargetFound = objectFollower.mode != ObjectFollower.Mode.NO_TARGET
+        binding.overlay.target = if (following) objectFollower.tracked else null
 
         if (autonomous.get()) {
-            sendDrive(followDrive ?: avoider.decide(r.free, now))
+            if (followDrive != null && vehicleType == Drivetrain.VehicleType.STEERING) {
+                // Tipul 2 are regula lui de urmărire: roțile spre țintă, fără „rotire pe loc” inversată
+                sendSteer(objectFollower.steering(followDrive, steerGain / Drivetrain.DEFAULT_STEER_GAIN))
+            } else {
+                sendDrive(followDrive ?: avoider.decide(r.free, now))
+            }
         }
 
         throttledStatus()

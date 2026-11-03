@@ -20,7 +20,7 @@ import kotlin.math.sign
  */
 class LineSteerController {
 
-    enum class Mode { FOLLOW, SEARCH, LOST }
+    enum class Mode { FOLLOW, RETRACE, SEARCH, LOST }
 
     @Volatile var mode = Mode.FOLLOW
         private set
@@ -47,6 +47,10 @@ class LineSteerController {
     private var stableSinceMs = 0L
     private var sameSideSinceMs = 0L
 
+    // Drumul parcurs, ca să se poată întoarce acolo unde a văzut linia ultima dată
+    private val history = CommandHistory(RETRACE_MS)
+    private var searchStartMs = 0L
+
     fun reset() {
         mode = Mode.FOLLOW
         filtered = Float.NaN
@@ -58,6 +62,8 @@ class LineSteerController {
         lastBigSign = 0
         stableSinceMs = 0L
         sameSideSinceMs = 0L
+        history.clear()
+        searchStartMs = 0L
     }
 
     fun decide(r: LineResult, nowMs: Long): Drivetrain.SteerDrive {
@@ -65,17 +71,11 @@ class LineSteerController {
         val lookahead = ((speedNorm - LineFollower.LOOKAHEAD_FROM) / LineFollower.LOOKAHEAD_SPAN).coerceIn(0f, 1f)
         val raw = LineFollower.position(r, lookahead)
 
-        if (raw.isNaN()) {
-            lastMs = 0L
-            filtered = Float.NaN
-            dFiltered = 0f
-            // Linia a ieșit din imagine: înainte încet, cu roțile bracate spre partea unde a fost
-            if (lastSide != 0 && lastSeenMs > 0 && nowMs - lastSeenMs < SEARCH_MS) {
-                mode = Mode.SEARCH
-                return Drivetrain.SteerDrive(lastSide.toFloat(), speed(SEARCH_SPEED))
-            }
-            mode = Mode.LOST
-            return Drivetrain.SteerDrive(0f, 0)
+        if (raw.isNaN()) return lost(nowMs)
+        if (mode != Mode.FOLLOW) {
+            // Linia a reapărut: oprim întoarcerea și căutarea
+            history.stopReplay()
+            searchStartMs = 0L
         }
 
         val err = if (filtered.isNaN()) raw else filtered + SMOOTHING * (raw - filtered)
@@ -101,7 +101,38 @@ class LineSteerController {
 
         // Încetinim în curbe și cu roțile bracate, ca să aibă timp să corecteze
         val slow = 1f - SLOWDOWN * min(1f, abs(predicted)) - STEER_SLOWDOWN * abs(steer)
-        return Drivetrain.SteerDrive(steer, speed(BASE_SPEED * max(MIN_SLOW, slow)))
+        val cmd = Drivetrain.SteerDrive(steer, speed(BASE_SPEED * max(MIN_SLOW, slow)))
+        history.record(nowMs, cmd.steer, cmd.speed.toFloat())
+        return cmd
+    }
+
+    /**
+     * Linia nu se mai vede. Întâi dăm înapoi pe drumul parcurs, cu aceleași unghiuri, până reapare;
+     * dacă istoricul se termină fără ea, mergem încet înainte cu roțile spre partea unde a fost; apoi oprim.
+     */
+    private fun lost(nowMs: Long): Drivetrain.SteerDrive {
+        lastMs = 0L
+        filtered = Float.NaN
+        dFiltered = 0f
+        if (mode == Mode.FOLLOW && lastSeenMs > 0) {
+            mode = if (history.startReplay(nowMs)) Mode.RETRACE else Mode.SEARCH
+            if (mode == Mode.SEARCH) searchStartMs = nowMs
+        }
+        if (mode == Mode.RETRACE) {
+            val c = history.replay(nowMs)
+            if (c != null) {
+                // Același unghi, viteză inversată și plafonată: arcul rămâne același, doar mai încet
+                val back = -min(abs(c.second), RETRACE_SPEED * speedFactor).toInt()
+                return Drivetrain.SteerDrive(c.first, if (c.second < 0f) -back else back)
+            }
+            mode = Mode.SEARCH
+            searchStartMs = nowMs
+        }
+        if (mode == Mode.SEARCH && lastSide != 0 && nowMs - searchStartMs < SEARCH_MS) {
+            return Drivetrain.SteerDrive(lastSide.toFloat(), speed(SEARCH_SPEED))
+        }
+        mode = Mode.LOST
+        return Drivetrain.SteerDrive(0f, 0)
     }
 
     private fun speed(base: Float): Int = (base * speedFactor * learnedSpeed).toInt().coerceIn(-100, 100)
@@ -150,6 +181,9 @@ class LineSteerController {
         const val BASE_SPEED = 35f
         const val SEARCH_SPEED = 18f
         const val SEARCH_MS = 1500L
+        // Cât din drumul parcurs poate reface înapoi și cu ce viteză maximă
+        const val RETRACE_MS = 2500L
+        const val RETRACE_SPEED = 25f
         const val SIDE_DEADBAND = 0.1f
         const val SMOOTHING = 0.85f
         const val D_SMOOTHING = 0.5f
