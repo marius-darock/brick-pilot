@@ -1,8 +1,9 @@
 # BrickPilot
 
 An Android app that turns a phone into the brain of a LEGO Technic robot car.
-The phone looks at the floor through its rear camera, finds obstacles or a line, and drives the
-motors of a Technic Hub 88012 over Bluetooth LE.
+The phone looks at the floor through its rear camera, finds obstacles, a line or an object with
+OpenCV, and drives the motors of a hub over Bluetooth LE. Tested with the Technic Hub 88012; the
+Powered Up Hub 88009 and the BOOST Move Hub 88006 use the same protocol but have not been tried.
 
 Current version: **1.5.0** (versionCode 6).
 
@@ -20,13 +21,13 @@ Two kinds of car are supported:
 | `GroundView.kt` | Perspective transform to a top-down view of the floor |
 | `PurePursuit.kt` | Line mode: aims at a point on the line ahead and gives the arc to drive |
 | `Avoider.kt` | Decision: drive, slow down, spin in place, motor mixing |
-| `LineDetector.kt` | Vision for line mode: black line on 5 bands, linked chains, ignores stray dots |
+| `LineDetector.kt` | Vision for line mode (OpenCV): finds the black line, rejects seams, shadows and stains |
 | `CommandHistory.kt` | Last driving commands, replayed backwards to return to the line |
 | `ObjectTracker.kt` | Follow mode: recognises the target by its colour and tracks it |
-| `LineFollower.kt` | Decision for line mode: PD controller, look-ahead at speed, search when the line is lost |
+| `LineFollower.kt` | Type 1 line mode: pure pursuit, PD controller as fallback, return and search when the line is lost |
 | `ObjectFollower.kt` | Decision for follow mode: turns towards the closest object, keeps the distance |
 | `Drivetrain.kt` | Turns a drive command into port commands: differential (type 1) or steering + drive (type 2) |
-| `LineSteerController.kt` | Type 2 line mode: delay-compensated steering, speed-scaled angle, auto slow-down, learning |
+| `LineSteerController.kt` | Type 2 line mode: pure pursuit, position controller as fallback, auto slow-down, learning |
 | `SteeringCalibrator.kt` | Type 2: finds both steering end stops and the straight-ahead center |
 | `GridOverlayView.kt` | Grid drawn over the camera preview |
 | `MainActivity.kt` | Glue: UI, permissions, camera, car type |
@@ -43,7 +44,9 @@ Needs JDK 17 and Android SDK 36 (`local.properties` points to the SDK). Vision u
 (`org.opencv:opencv`, native libraries for ARM phones only); the host unit tests run the same vision
 code with `org.openpnp:opencv`.
 
-Tests: `./gradlew testDebugUnitTest`.
+Tests: `./gradlew testDebugUnitTest`. They cover the vision on synthetic images and on real frames from
+a phone (`app/src/test/resources/frames`), and the driving on simulated cars. They do not replace a
+run on the real car: the camera perspective and the car geometry are estimates.
 
 ## Google Play
 
@@ -83,8 +86,8 @@ mounted lying down (landscape) or standing up (portrait).
 
 - Rotating does not restart the app: the hub connection, the steering calibration and autonomous
   driving all continue.
-- The camera image is analysed upright in both orientations. In portrait the grid and the line bands
-  cover a taller, narrower image, so the camera sees further ahead and less to the sides; check the
+- The camera image is analysed upright in both orientations. In portrait the vision works on a taller,
+  narrower image, so the camera sees further ahead and less to the sides; check the
   tilt so the yellow floor box still sits right in front of the wheels.
 - Landscape: buttons in the side columns, sliders in one row at the bottom.
 - Portrait: CONNECT and MODE at the top left, the status under them, START and STOP side by side at
@@ -94,8 +97,9 @@ mounted lying down (landscape) or standing up (portrait).
 ## Car type
 
 The app asks for the car type on the first start and remembers it. To change it later, tap the small
-**TYPE** button in the bottom-left corner; it also works while connected: the car stops, and choosing type 2 calibrates the steering right away. Each type keeps its own invert
-settings.
+**TYPE** button in the bottom-left corner. It also works while connected: the car stops, and choosing
+type 2 calibrates the steering right away. Each type keeps its own invert settings. If a steering car
+does not calibrate on CONNECT or cannot turn, check first that this button says **TYPE 2**.
 
 ### Type 1, differential
 
@@ -119,9 +123,8 @@ settings.
 - **START** is enabled only after a successful calibration. If it fails, a dialog offers **Retry**.
   The steering needs physical left and right end stops; without them calibration gives up after
   8 seconds.
-- **Steer** slider (bottom right, 100..400%, default 180%): how hard the wheels turn for the same
-  command. A steering car turns wider than a differential one, so raise it if the car does not turn
-  enough (220..250% works well for a stiff mechanism), lower it if it weaves on a straight line.
+- **Steer** slider (100..400%, default 180%, only on type 2): how hard the wheels turn for the same
+  command. Raise it if the car does not turn enough, lower it if it weaves on a straight line.
 - The steering motor runs at full speed and power while driving, so it reaches the requested angle
   even with the wheels pressed on the floor.
 - The car cannot spin in place, so the spins of the autonomous modes become reversing with the
@@ -138,8 +141,9 @@ The time from the camera seeing something to the motors reacting is kept short:
 - Only commands that change are sent; the same speed is not resent on every frame.
 - An unconfirmed write waits at most 25 ms before the next one goes out.
 - The camera is locked at 30 frames per second, so it does not drop to 15 fps in dim rooms.
-- In line mode the line position is only lightly smoothed, and above 80% speed the far bands count
-  more, so the car starts a curve before it reaches it.
+- In line mode the car aims further ahead at higher speed and predicts where the aim point will be
+  when the command reaches the motors, so it starts a curve before it reaches it. The aim point is
+  averaged and the prediction is limited, so detection noise does not jerk the steering.
 
 To measure it on a phone, read the log while driving:
 
@@ -155,8 +159,10 @@ time and the steering calibration results.
 The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLES**, **MODE: LINE**,
 **MODE: FOLLOW**. The mode is saved. Changing the mode while driving stops the robot.
 
-- The line: black electrical tape or black adhesive tape, 1.5..3 cm wide, on a light floor.
-  Contrast is what matters: on dark parquet a black line is hard to see.
+- The line: black electrical tape or black adhesive tape, at least about 6-8 mm wide, on a lighter
+  floor. It must be really dark: under 55% of the floor brightness. On dark parquet a black line may
+  not qualify. The minimum width is estimated from real frames and depends on how high the phone is
+  mounted.
 - On screen the line found is drawn in yellow from the bottom up; below the thin horizontal line is
   the area that is analysed. While driving, a cyan circle marks the point on the line the car is
   aiming at. A red frame around the image means the line is not visible.
@@ -165,14 +171,17 @@ The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLE
     (adaptive threshold) and also really black, under 55% of the floor brightness. Parquet joints,
     shadows and grey planks fail this, so they do not merge with the line even when it crosses them;
   - **morphological clean-up**: parquet joints and isolated dots are removed;
-  - **connected components**: the line is one long object at least about 6-8 mm wide (`MIN_THICKNESS`, estimated from real frames). Stains and short pieces (less than
-    a fifth of the analysed height), thick blobs (shadows, furniture) and the edge of a shadow coming
-    into the picture (dark on one side only) are rejected;
-  - once a line is followed its thickness is remembered, so a much thinner seam cannot replace it when the line leaves the picture;
+  - **connected components**: the line is one long object, not thinner than `MIN_THICKNESS`. Stains
+    and short pieces (less than a fifth of the analysed height), thick blobs (shadows, furniture) and
+    the edge of a shadow coming into the picture (dark on one side only) are rejected;
+  - once a line is followed its thickness is remembered, so a much thinner seam cannot replace it
+    when the line leaves the picture;
   - among the candidates, the one that starts right in front of the robot and is closest to where the
     line was in the previous frame wins, so a second line at the side does not steal the robot;
   - the chosen line is turned into a **top-down view** of the floor (perspective transform,
     `GroundView.kt`), so the controller knows its real shape, not the one squeezed by perspective.
+  - in a sharp or U-shaped curve the line is followed from the bottom up, on the branch in front of
+    the car.
 - **Pure pursuit** (`PurePursuit.kt`): the car aims at the point on the line that lies a certain
   distance ahead and drives the circular arc through it. The distance grows with speed, so at high
   speed the car aims further and turns more smoothly; in a curve the point is to the side, so the car
@@ -192,16 +201,15 @@ The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLE
 A steering car follows the line with its own controller (`LineSteerController.kt`). A plain
 proportional controller works at low speed but at high speed it over-corrects: the same wheel angle
 turns the car faster the faster it goes, and the command reaches the wheels late (camera, Bluetooth,
-steering motor, play in the mechanism). The car crosses the line, corrects too much the other way and
-the swings grow until it loses the line. The new controller:
+steering motor, play in the mechanism). On top of pure pursuit, the controller:
 
-- **predicts where the line will be** when the command reaches the wheels (about 0.3 s ahead), so it
-  straightens the wheels before crossing the line instead of after;
-- **turns the wheels less at higher speed**, so the car turns at the same rate at any speed;
 - **slows down** in curves and when the wheels are turned hard, to have time to correct;
-- **learns**: if the car swings across the line twice within 2.5 s, it lowers its speed by 10% (and, only without the top-down line, its steering strength
-  by 15%). After 3 s steady on the line it slowly returns towards the speed you
-  set.
+- **falls back to a position controller** when there is no usable top-down line. It predicts the
+  line about 0.3 s ahead and turns the wheels less at higher speed;
+- **learns**: if the car swings across the line twice within 2.5 s, it lowers its speed by 10%. With
+  the position controller it also lowers its steering strength by 15%, and steers harder if it stays
+  on one side of the line for long. After 3 s steady on the line it slowly returns towards the speed
+  you set;
 - **remembers** what it learned: the values are saved when you press STOP and loaded on the next
   start. The status line shows `learned steer N% speed N%`. **Long-press the "Steer" label** to reset
   them to 100%.
@@ -210,16 +218,16 @@ the swings grow until it loses the line. The new controller:
   forward with the wheels turned towards the side where it saw the line last, for at most 1.5 s,
   then stops. The status shows `AUTO RETRACE`, `AUTO SEARCH` or `AUTO LOST`.
 
-The **Speed** and **Steer** sliders still apply. Start with Steer at 180% and let it learn; if it
-still swings, lower Steer.
+The **Speed** and **Steer** sliders still apply. Start with Speed at 60..80% and Steer at 180%, then
+raise the speed step by step; if it still swings, lower Steer.
 
 These behaviours are checked by simulations in `app/src/test/.../LineSteerTest.kt` and
 `DiffPursuitTest.kt`: car models with the real delay, a rate-limited steering motor, play in the
 mechanism (type 2) or motors that need time to reach speed (type 1), on a straight line and on a
 1 m radius curve, with and without detection noise. In those models pure pursuit stays within about
 3 cm of the line up to 167% speed and 5-6 cm at 200% in a curve, and the old proportional controller
-loses the line at high speed, as on the real
-car.
+loses the line at high speed. These models are approximations: they do not prove how a given car
+behaves, so check on the real car and tune below if needed.
 
 Tuning:
 - `PurePursuit.kt`: `LOOKAHEAD_MIN` and `LOOKAHEAD_PER_SPEED` (how far ahead it aims; further =
@@ -230,12 +238,14 @@ Tuning:
   and the learning limits `MIN_LEARNED_GAIN`, `MIN_LEARNED_SPEED`;
 - `LineFollower.kt` (type 1): `PURSUIT_TRACK` (arc to wheel speed difference), `SLOWDOWN`,
   `SEARCH_MS`, `SEARCH_TURN`;
-- `LineDetector.kt`: `ADAPTIVE_C` (how much darker than its surroundings a pixel must be),
-  `MIN_SPAN` (shortest accepted piece of line), `MAX_THICKNESS`, `SIDE_CONTRAST`, `ROI_TOP`.
+- `LineDetector.kt`: `MIN_THICKNESS` (thinnest accepted line; raise it if seams are still taken for
+  the line, lower it if a thin line is not found), `DARK_RATIO` (how black the line must be),
+  `ADAPTIVE_C` (how much darker than its surroundings a pixel must be), `MIN_SPAN` (shortest accepted
+  piece of line), `MAX_THICKNESS`, `SIDE_CONTRAST`, `ROI_TOP`.
 
 ## Stopping
 
-- The **STOP** button fills the whole right column.
+- The **STOP** button fills the right column in landscape and sits next to START in portrait.
 - While the robot drives on its own, a touch anywhere on the camera image stops it just like STOP.
 - STOP also stops a running steering calibration; the dialog then offers **Retry**.
 
@@ -283,8 +293,8 @@ compared with the threshold.
 **Sees obstacles everywhere (too much red).** Raise the threshold slider (bottom). On patterned
 carpets, 20..30.
 
-**Parquet joints.** The picture goes through a median filter before the cells are compared, so a thin line between boards does not
-count. A cell over the threshold with no neighbour over the threshold is ignored (stays green).
+**Parquet joints.** The picture goes through a median filter before the cells are compared, so a thin
+line between boards does not count. A cell over the threshold with no neighbour over the threshold is ignored (stays green).
 The number in a cell is the real distance, so it can exceed the threshold even when the cell is green.
 If the boards have very different shades, raise the threshold.
 
