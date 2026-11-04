@@ -96,14 +96,14 @@ class LineSteerController {
         lastSeenMs = nowMs
         if (abs(err) > SIDE_DEADBAND) lastSide = if (err > 0) 1 else -1
         mode = Mode.FOLLOW
-        learn(err, nowMs)
+        // Cu linia văzută de sus țintim un punct de pe ea (pure pursuit); altfel, regulatorul pe poziție
+        val k = pursuit.curvature(r.ground, speedNorm, nowMs)
+        learn(err, nowMs, adjustGain = k.isNaN())
 
         // Unde va fi linia când comanda ajunge la roți
         val predicted = err + dFiltered * LATENCY_S
-        // Cu linia văzută de sus țintim un punct de pe ea (pure pursuit); altfel, regulatorul pe poziție
-        val k = pursuit.curvature(r.ground, speedNorm, nowMs)
         val steer = if (!k.isNaN()) {
-            (K_PURSUIT * k * steerScale * learnedGain).coerceIn(-1f, 1f)
+            (K_PURSUIT * k * steerScale).coerceIn(-1f, 1f)
         } else {
             // La viteză mare același unghi întoarce mai repede: unghiul scade cu viteza
             val schedule = 1f / max(MIN_SCHEDULE_SPEED, speedNorm).pow(SPEED_EXPONENT)
@@ -149,7 +149,7 @@ class LineSteerController {
 
     private fun speed(base: Float): Int = (base * speedFactor * learnedSpeed).toInt().coerceIn(-100, 100)
 
-    private fun learn(err: Float, nowMs: Long) {
+    private fun learn(err: Float, nowMs: Long, adjustGain: Boolean) {
         // Oscilație: eroarea mare își schimbă semnul de mai multe ori într-un timp scurt
         if (abs(err) > OSC_AMPLITUDE) {
             val s = sign(err).toInt()
@@ -158,7 +158,8 @@ class LineSteerController {
         }
         while (crossings.isNotEmpty() && nowMs - crossings.first() > OSC_WINDOW_MS) crossings.removeFirst()
         if (crossings.size >= OSC_CROSSINGS) {
-            learnedGain = max(MIN_LEARNED_GAIN, learnedGain * GAIN_DOWN)
+            // Pure pursuit virează cât cere geometria: acolo oscilația se tratează doar prin viteză
+            if (adjustGain) learnedGain = max(MIN_LEARNED_GAIN, learnedGain * GAIN_DOWN)
             learnedSpeed = max(MIN_LEARNED_SPEED, learnedSpeed * SPEED_DOWN)
             crossings.clear()
             stableSinceMs = nowMs
@@ -178,7 +179,7 @@ class LineSteerController {
         }
 
         // Rămâne mult timp de aceeași parte a liniei: virează prea puțin în curbă
-        if (abs(err) > UNDERSTEER_ERR && crossings.isEmpty()) {
+        if (adjustGain && abs(err) > UNDERSTEER_ERR && crossings.isEmpty()) {
             if (sameSideSinceMs == 0L) sameSideSinceMs = nowMs
             if (nowMs - sameSideSinceMs > UNDERSTEER_MS) {
                 learnedGain = min(MAX_LEARNED_GAIN, learnedGain * GAIN_UNDERSTEER)

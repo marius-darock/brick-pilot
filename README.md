@@ -94,7 +94,7 @@ mounted lying down (landscape) or standing up (portrait).
 ## Car type
 
 The app asks for the car type on the first start and remembers it. To change it later, tap the small
-**TYPE** button in the bottom-left corner (only while disconnected). Each type keeps its own invert
+**TYPE** button in the bottom-left corner; it also works while connected: the car stops, and choosing type 2 calibrates the steering right away. Each type keeps its own invert
 settings.
 
 ### Type 1, differential
@@ -161,12 +161,14 @@ The purple button under CONNECT cycles through the three modes: **MODE: OBSTACLE
   the area that is analysed. While driving, a cyan circle marks the point on the line the car is
   aiming at. A red frame around the image means the line is not visible.
 - How the line is recognised (`LineDetector.kt`, with OpenCV):
-  - **adaptive threshold**: a pixel counts as dark when it is darker than the floor right around it,
-    so wide shadows and uneven light do not matter;
+  - **two darkness checks**: a pixel counts as line when it is darker than the floor right around it
+    (adaptive threshold) and also really black, under 55% of the floor brightness. Parquet joints,
+    shadows and grey planks fail this, so they do not merge with the line even when it crosses them;
   - **morphological clean-up**: parquet joints and isolated dots are removed;
-  - **connected components**: the line is one long, thin object. Stains and short pieces (less than
+  - **connected components**: the line is one long object at least about 6-8 mm wide (`MIN_THICKNESS`, estimated from real frames). Stains and short pieces (less than
     a fifth of the analysed height), thick blobs (shadows, furniture) and the edge of a shadow coming
     into the picture (dark on one side only) are rejected;
+  - once a line is followed its thickness is remembered, so a much thinner seam cannot replace it when the line leaves the picture;
   - among the candidates, the one that starts right in front of the robot and is closest to where the
     line was in the previous frame wins, so a second line at the side does not steal the robot;
   - the chosen line is turned into a **top-down view** of the floor (perspective transform,
@@ -197,9 +199,9 @@ the swings grow until it loses the line. The new controller:
   straightens the wheels before crossing the line instead of after;
 - **turns the wheels less at higher speed**, so the car turns at the same rate at any speed;
 - **slows down** in curves and when the wheels are turned hard, to have time to correct;
-- **learns**: if the car swings across the line twice within 2.5 s, it lowers its steering strength
-  by 15% and its speed by 10%. After 3 s steady on the line it slowly returns towards the speed you
-  set. If it stays on the same side of the line for a long time in a curve, it steers harder.
+- **learns**: if the car swings across the line twice within 2.5 s, it lowers its speed by 10% (and, only without the top-down line, its steering strength
+  by 15%). After 3 s steady on the line it slowly returns towards the speed you
+  set.
 - **remembers** what it learned: the values are saved when you press STOP and loaded on the next
   start. The status line shows `learned steer N% speed N%`. **Long-press the "Steer" label** to reset
   them to 100%.
@@ -214,7 +216,7 @@ still swings, lower Steer.
 These behaviours are checked by simulations in `app/src/test/.../LineSteerTest.kt` and
 `DiffPursuitTest.kt`: car models with the real delay, a rate-limited steering motor, play in the
 mechanism (type 2) or motors that need time to reach speed (type 1), on a straight line and on a
-1 m radius curve. In those models pure pursuit stays within about 3 cm of the line at every speed
+1 m radius curve, with and without detection noise. In those models pure pursuit stays within about 3 cm of the line up to 167% speed and 5-6 cm at 200% in a curve,
 from 60% to 200%, and the old proportional controller loses the line at high speed, as on the real
 car.
 

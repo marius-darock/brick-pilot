@@ -54,6 +54,33 @@ class VisionTest {
         assertTrue(pos.all { it.isNaN() })
     }
 
+    // Arc de cerc care pornește de jos, de la x = 320, și se curbează la dreapta
+    private fun arc(radius: Float, tape: Float): (Int, Int) -> Int = { x, y ->
+        if (abs(kotlin.math.hypot(x - (320f + radius), y - 480f) - radius) < tape / 2) 30 else 160
+    }
+
+    @Test
+    fun sharpCurveIsNotLost() {
+        // Pe partea orizontală a curbei, punctele de lângă centru cad tot pe bandă; linia nu trebuie respinsă
+        for (tape in listOf(16f, 30f, 60f)) for (radius in listOf(400f, 250f, 150f)) {
+            val r = LineDetector { }.detectFull(640, 480, arc(radius, tape))
+            assertTrue("bandă $tape, rază $radius: linia lipsește", r.found && r.ground.size >= 4)
+        }
+    }
+
+    @Test
+    fun uCurveStaysOnTheBranchInFrontOfTheRobot() {
+        // Rază 150: un rând taie linia de două ori. Jos, linia e la centru, nu între cele două ramuri
+        val pos = LineDetector { }.detect(640, 480, arc(150f, 30f))
+        assertEquals(0f, pos[0], 0.1f)
+    }
+
+    @Test
+    fun wideTapeCloseToTheCameraIsFound() {
+        val pos = LineDetector { }.detect(640, 480) { x, _ -> if (x in 275..365) 30 else 160 }
+        for (p in pos) assertEquals(0f, p, 0.05f)
+    }
+
     @Test
     fun type1RetracesBackwardsAfterLosingTheLine() {
         val f = LineFollower()

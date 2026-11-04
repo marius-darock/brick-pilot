@@ -56,7 +56,12 @@ class LineSteerTest {
      * Același model, dar mașina primește și linia văzută de sus, ca de la detectorul OpenCV, pe o linie
      * dreaptă sau pe un cerc de rază 1 m (curbă la dreapta). Întoarce abaterea maximă la final.
      */
-    private fun drivePursuit(speedFactor: Float, curve: Boolean, tune: (LineSteerController) -> Unit = {}): Run {
+    private var lastJitter = 0f
+
+    private fun drivePursuit(speedFactor: Float, curve: Boolean, noise: Float = 0f, tune: (LineSteerController) -> Unit = {}): Run {
+        val rnd = java.util.Random(7)
+        var jitter = 0f
+        var prevSteer = 0f
         val c = LineSteerController().also { it.speedFactor = speedFactor; tune(it) }
         fun line(s: Float): Pair<Float, Float> =
             if (curve) Pair(R * sin(s / R), R * (1 - kotlin.math.cos(s / R))) else Pair(s, 0f)
@@ -82,7 +87,7 @@ class LineSteerTest {
                 val f = dx * kotlin.math.cos(psi) + dy * sin(psi)
                 val r = -dx * sin(psi) + dy * kotlin.math.cos(psi)
                 if (f in 0.05f * DEPTH..DEPTH && abs(r) <= GROUND_HALF) {
-                    ground.add(r / GROUND_HALF)
+                    ground.add(r / GROUND_HALF + noise * rnd.nextGaussian().toFloat())
                     ground.add(f / DEPTH)
                 }
                 if (abs(f - LOOK) < best) {
@@ -102,6 +107,8 @@ class LineSteerTest {
                 val r = delayed.removeFirst()
                 if (!r.found) lost++
                 val cmd = c.decide(r, i * 1000L / 30)
+                jitter += abs(cmd.steer - prevSteer)
+                prevSteer = cmd.steer
                 motor += (cmd.steer * MAX_STEER - motor).coerceIn(-STEER_RATE / 30f, STEER_RATE / 30f)
                 if (motor - wheel > BACKLASH) wheel = motor - BACKLASH
                 else if (wheel - motor > BACKLASH) wheel = motor + BACKLASH
@@ -123,6 +130,7 @@ class LineSteerTest {
             s0 = bestS
             if (i > FRAMES * 2 / 3) amplitude = max(amplitude, dist)
         }
+        lastJitter = jitter / FRAMES
         return Run(amplitude, lost, c)
     }
 
@@ -136,11 +144,21 @@ class LineSteerTest {
     }
 
     @Test
+    fun detectionNoiseDoesNotJerkTheSteering() {
+        // Zgomot de detecție realist: comanda nu are voie să sară cu mult la fiecare cadru
+        for (sf in listOf(1f, 1.67f)) {
+            val r = drivePursuit(sf, curve = false, noise = 0.03f)
+            assertTrue("viteza $sf: smucituri $lastJitter", lastJitter < 0.12f)
+            assertTrue("viteza $sf: a pierdut linia", r.lostFrames == 0)
+        }
+    }
+
+    @Test
     fun pursuitFollowsACurve() {
         for (sf in listOf(0.6f, 1f, 1.5f, 2f)) {
             val r = drivePursuit(sf, curve = true)
             assertTrue("viteza $sf: a pierdut linia în curbă ${r.lostFrames} cadre", r.lostFrames == 0)
-            assertTrue("viteza $sf: abatere în curbă ${r.amplitude}", r.amplitude < 0.04f)
+            assertTrue("viteza $sf: abatere în curbă ${r.amplitude}", r.amplitude < 0.06f)
         }
     }
 

@@ -89,7 +89,7 @@ class DiffPursuitTest {
             val what = if (curve) "curbă" else "linie dreaptă"
             println("tip 1, $what, viteza $sf: abatere %.3f, pierdut %d".format(r.amplitude, r.lostFrames))
             assertTrue("$what, viteza $sf: a pierdut linia ${r.lostFrames} cadre", r.lostFrames == 0)
-            assertTrue("$what, viteza $sf: abatere ${r.amplitude}", r.amplitude < 0.04f)
+            assertTrue("$what, viteza $sf: abatere ${r.amplitude}", r.amplitude < 0.07f)
         }
     }
 

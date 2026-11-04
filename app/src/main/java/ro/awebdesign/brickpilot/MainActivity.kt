@@ -294,7 +294,11 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         if (!prefs.contains(KEY_VEHICLE)) binding.vehiclePicker.visibility = View.VISIBLE
         binding.cardType1.setOnClickListener { selectVehicle(Drivetrain.VehicleType.DIFFERENTIAL) }
         binding.cardType2.setOnClickListener { selectVehicle(Drivetrain.VehicleType.STEERING) }
-        binding.btnVehicle.setOnClickListener { binding.vehiclePicker.visibility = View.VISIBLE }
+        binding.btnVehicle.setOnClickListener {
+            // Mașina stă pe loc cât timp se alege tipul; motoarele ar primi altfel comenzi pentru alt montaj
+            if (hub.isReady) stopAutonomous()
+            binding.vehiclePicker.visibility = View.VISIBLE
+        }
 
         binding.btnConnect.setOnClickListener {
             if (hub.isReady) {
@@ -349,6 +353,9 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         prefs.edit().putInt(KEY_VEHICLE, type.ordinal).apply()
         binding.vehiclePicker.visibility = View.GONE
         applyVehicleType()
+        // Conectat deja: direcția se calibrează acum, fără reconectare
+        if (hub.isReady && type == Drivetrain.VehicleType.STEERING) startCalibration()
+        updateButtons()
         renderStatus()
     }
 
@@ -397,8 +404,6 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         val steeringReady = vehicleType == Drivetrain.VehicleType.DIFFERENTIAL || steeringRange != null
         binding.btnStart.isEnabled = ready && steeringReady && !autonomous.get()
         binding.btnStop.isEnabled = ready
-        // Tipul se schimbă doar deconectat, altfel calibrarea și inversările n-ar mai corespunde
-        binding.btnVehicle.isEnabled = !ready && !busy
     }
 
     private fun renderStatus() {
@@ -575,6 +580,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
 
     override fun onStateChanged(state: HubController.State, message: String) {
         hubText = "Hub: $message"
+        Log.i(TAG, "Hub $state, car type $vehicleType")
         if (state != HubController.State.READY) {
             autonomous.set(false)
             stopCalibration()
@@ -593,6 +599,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
     private fun startCalibration() {
         steeringRange = null
         steerText = "steering: calibrating..."
+        Log.i(TAG, "Steering calibration started")
         hub.subscribeFine(HubController.PORT_A)
         calibrator.start(SystemClock.uptimeMillis())
         uiHandler.removeCallbacks(calibrationTick)
@@ -631,6 +638,7 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         }
 
         override fun onFailed(message: String) {
+            Log.w(TAG, "Steering calibration failed: $message")
             uiHandler.removeCallbacks(calibrationTick)
             steerText = "steering not calibrated"
             updateButtons()
@@ -816,8 +824,8 @@ class MainActivity : AppCompatActivity(), HubController.Listener {
         private const val KEY_INV_DRIVE = "inv_b_drive"
         private const val KEY_VEHICLE = "vehicle_type"
         private const val KEY_STEER_GAIN = "steer_gain"
-        private const val KEY_LEARN_GAIN = "learn_steer_gain"
-        private const val KEY_LEARN_SPEED = "learn_steer_speed"
+        private const val KEY_LEARN_GAIN = "learn_gain_v2"
+        private const val KEY_LEARN_SPEED = "learn_speed_v2"
         private const val STATUS_INTERVAL_MS = 150L
         private const val CALIBRATION_TICK_MS = 50L
         // Pe verticală START și STOP sunt mai joase, ca să nu acopere chenarul galben al podelei
