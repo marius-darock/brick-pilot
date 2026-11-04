@@ -216,8 +216,9 @@ still swings, lower Steer.
 These behaviours are checked by simulations in `app/src/test/.../LineSteerTest.kt` and
 `DiffPursuitTest.kt`: car models with the real delay, a rate-limited steering motor, play in the
 mechanism (type 2) or motors that need time to reach speed (type 1), on a straight line and on a
-1 m radius curve, with and without detection noise. In those models pure pursuit stays within about 3 cm of the line up to 167% speed and 5-6 cm at 200% in a curve,
-from 60% to 200%, and the old proportional controller loses the line at high speed, as on the real
+1 m radius curve, with and without detection noise. In those models pure pursuit stays within about
+3 cm of the line up to 167% speed and 5-6 cm at 200% in a curve, and the old proportional controller
+loses the line at high speed, as on the real
 car.
 
 Tuning:
